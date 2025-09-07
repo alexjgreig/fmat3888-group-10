@@ -471,3 +471,60 @@ class DupireLocalVolatility:
             results['estimated_paths'] = estimated_n
         
         return results
+    
+
+    def plot_barrier_paths(self, K: float, H: float, T: float,
+                        barrier_type: str = 'down-out', option_type: str = 'call',
+                        n_paths: int = 200, n_steps: int = 252,
+                        scheme: str = 'milstein', use_log_scheme: bool = True):
+        """
+        Plot simulated paths for a barrier option with barrier and average path.
+        
+        Args:
+            K: Strike price
+            H: Barrier level
+            T: Time to maturity
+            barrier_type: 'down-out', 'down-in', 'up-out', 'up-in'
+            option_type: 'call' or 'put'
+            n_paths: Number of simulated paths (use small number for visualization)
+            n_steps: Number of time steps
+            scheme: 'euler' or 'milstein'
+            use_log_scheme: If True, simulate in log-space
+        """
+        import matplotlib.pyplot as plt
+        # Monte Carlo simulation
+        mc_engine = MonteCarloEngine(
+            n_paths=n_paths,
+            n_steps=n_steps,
+            scheme=scheme,
+            use_antithetic=True
+        )
+
+        def local_vol_func(S, t):
+            return self.get_local_vol(S, t)
+
+        paths = mc_engine.simulate_local_vol_paths(
+            self.spot, self.r, T, local_vol_func, self.q, use_log_scheme=use_log_scheme
+        )
+
+        # Time grid
+        time_grid = np.linspace(0, T, n_steps + 1)
+
+        # Plot all paths
+        plt.figure(figsize=(10, 6))
+        for i in range(n_paths):
+            plt.plot(time_grid, paths[i], lw=0.8, alpha=0.6)
+
+        # Average path
+        avg_path = paths.mean(axis=0)
+        plt.plot(time_grid, avg_path, color="black", lw=2.0, label="Average Path")
+
+        # Barrier
+        plt.axhline(y=H, color="red", linestyle="--", lw=2, label=f"Barrier (H={H:.2f})")
+
+        # Labels
+        plt.title(f"Simulated Paths for {barrier_type.capitalize()} {option_type.capitalize()} Option")
+        plt.xlabel("Time (Years)")
+        plt.ylabel("Stock Price")
+        plt.legend()
+        plt.show()

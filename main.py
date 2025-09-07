@@ -189,6 +189,11 @@ def main():
     print(f"  Black-Scholes Barrier Price: ${lv_barrier_result['bs_price']:.4f}")
     print(f"  Knock-out Probability: {1 - lv_barrier_result['knock_probability']:.2%}")
     print(f"  Standard Error: {lv_barrier_result['std_error']:.6f}")
+
+    local_vol_model.plot_barrier_paths(K=K, H=H, T=T,
+                                   barrier_type='down-out',
+                                   option_type='call',
+                                   n_paths=200, n_steps=100)
     
     # Convergence Analysis (Fast Mode)
     print(f"\nAnalyzing convergence to target error {TARGET_ERROR} (fast mode)...")
