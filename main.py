@@ -175,13 +175,13 @@ def main():
     print(f"  Standard Error: {lv_euro_result['std_error']:.6f}")
     
     # Price Barrier Option
-    H = spot_price * 0.85  # 15% down barrier
+    H = spot_price * 0.80  # 15% down barrier
     
-    print(f"\nPricing Down-and-Out Call Option (K=${K:.2f}, H=${H:.2f}, T={T}y):")
+    print(f"\nPricing Down-and-Out Put Option (K=${K:.2f}, H=${H:.2f}, T={T}y):")
     
     lv_barrier_result = local_vol_model.price_barrier_option(
         K=K, H=H, T=T,
-        barrier_type='down-out', option_type='call',
+        barrier_type='down-out', option_type='put',
         n_paths=10000, n_steps=100, scheme='euler'  # Reduced complexity
     )
     
@@ -192,7 +192,7 @@ def main():
 
     local_vol_model.plot_barrier_paths(K=K, H=H, T=T,
                                    barrier_type='down-out',
-                                   option_type='call',
+                                   option_type='put',
                                    n_paths=200, n_steps=100)
     
     # Convergence Analysis (Fast Mode)

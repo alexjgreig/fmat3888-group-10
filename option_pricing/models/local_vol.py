@@ -510,10 +510,13 @@ class DupireLocalVolatility:
         # Time grid
         time_grid = np.linspace(0, T, n_steps + 1)
 
+        cmap = plt.get_cmap('turbo')                 # or 'rainbow' / 'nipy_spectral'
+        colors = cmap(np.linspace(0, 1, n_paths))    # one bright color per path
+
         # Plot all paths
         plt.figure(figsize=(10, 6))
         for i in range(n_paths):
-            plt.plot(time_grid, paths[i], lw=0.8, alpha=0.6)
+            plt.plot(time_grid, paths[i], lw=1.0, alpha=0.65, color=colors[i])
 
         # Average path
         avg_path = paths.mean(axis=0)
@@ -523,7 +526,13 @@ class DupireLocalVolatility:
         plt.axhline(y=H, color="red", linestyle="--", lw=2, label=f"Barrier (H={H:.2f})")
 
         # Labels
-        plt.title(f"Simulated Paths for {barrier_type.capitalize()} {option_type.capitalize()} Option")
+        barrier_labels = {
+            "down-out": "Down-and-Out",
+            "down-in": "Down-and-In",
+            "up-out": "Up-and-Out",
+            "up-in": "Up-and-In"
+        }
+        plt.title(f"Simulated Paths for {barrier_labels.get(barrier_type, barrier_type)} {option_type.capitalize()} Option")
         plt.xlabel("Time (Years)")
         plt.ylabel("Stock Price")
         plt.legend()
