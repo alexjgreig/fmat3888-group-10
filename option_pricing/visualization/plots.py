@@ -103,23 +103,24 @@ class OptionPricingVisualizer:
                         target_error: float = 1e-6,
                         log_scale: bool = True) -> None:
         """
-        Plot Monte Carlo convergence analysis.
+        Plot Monte Carlo convergence analysis with absolute errors and confidence intervals.
         
         Args:
             convergence_data: Dictionary with convergence results
             target_error: Target error tolerance line
             log_scale: Use log scale for axes
         """
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig, axes = plt.subplots(3, 2, figsize=(14, 15))
         
-        # Path convergence - Prices
+        # Path convergence - Prices with BS comparison
         ax = axes[0, 0]
         path_counts = convergence_data['path_convergence']['path_counts']
         prices = convergence_data['path_convergence']['prices']
+        bs_price = convergence_data.get('bs_price', prices[-1])
         
         ax.plot(path_counts, prices, 'o-', label='MC Price', linewidth=2)
-        ax.axhline(y=prices[-1], color='r', linestyle='--', alpha=0.5, 
-                  label=f'Converged Price: {prices[-1]:.4f}')
+        ax.axhline(y=bs_price, color='r', linestyle='--', alpha=0.5, 
+                  label=f'BS Price: {bs_price:.4f}')
         
         if log_scale:
             ax.set_xscale('log')
@@ -129,11 +130,24 @@ class OptionPricingVisualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Path convergence - Standard Errors
+        # Absolute Error (MC - BS)
         ax = axes[0, 1]
+        absolute_errors = convergence_data['path_convergence'].get('absolute_errors', 
+                                                                   [abs(p - bs_price) for p in prices])
+        
+        ax.loglog(path_counts, absolute_errors, 'o-', label='|MC - BS|', linewidth=2, color='red')
+        
+        ax.set_xlabel('Number of Paths')
+        ax.set_ylabel('Absolute Error')
+        ax.set_title('Absolute Error: |MC Price - BS Price|')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Standard Errors
+        ax = axes[1, 0]
         std_errors = convergence_data['path_convergence']['std_errors']
         
-        ax.loglog(path_counts, std_errors, 'o-', label='Actual Error', linewidth=2)
+        ax.loglog(path_counts, std_errors, 'o-', label='Standard Error', linewidth=2)
         
         # Theoretical 1/sqrt(n) convergence
         theoretical = std_errors[0] * np.sqrt(path_counts[0] / np.array(path_counts))
@@ -145,24 +159,50 @@ class OptionPricingVisualizer:
         
         ax.set_xlabel('Number of Paths')
         ax.set_ylabel('Standard Error')
-        ax.set_title('Error Convergence (Log-Log Scale)')
+        ax.set_title('Standard Error Convergence (Log-Log Scale)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Step convergence
-        if 'step_convergence' in convergence_data:
-            ax = axes[1, 0]
+        # Confidence Interval Precision
+        ax = axes[1, 1]
+        if 'confidence_intervals' in convergence_data['path_convergence']:
+            ci_data = convergence_data['path_convergence']['confidence_intervals']
+            ci_precisions = [ci['precision'] for ci in ci_data]
+            
+            ax.loglog(path_counts, ci_precisions, 'o-', label='95% CI Width', linewidth=2, color='purple')
+            ax.set_xlabel('Number of Paths')
+            ax.set_ylabel('Confidence Interval Width')
+            ax.set_title('95% Confidence Interval Precision')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        
+        # Step convergence - Prices
+        if 'step_convergence' in convergence_data and convergence_data['step_convergence']:
+            ax = axes[2, 0]
             step_counts = convergence_data['step_convergence']['step_counts']
             step_prices = convergence_data['step_convergence']['prices']
             
-            ax.plot(step_counts, step_prices, 's-', color='green', linewidth=2)
+            ax.plot(step_counts, step_prices, 's-', color='green', linewidth=2, label='MC Price')
+            ax.axhline(y=bs_price, color='r', linestyle='--', alpha=0.5, 
+                      label=f'BS Price: {bs_price:.4f}')
             ax.set_xlabel('Number of Time Steps')
             ax.set_ylabel('Option Price')
-            ax.set_title('Price Convergence vs Time Steps')
+            ax.set_title('Price Convergence vs Time Steps (10k paths)')
+            ax.legend()
             ax.grid(True, alpha=0.3)
+            
+            # Step convergence - Absolute Errors
+            ax = axes[2, 1]
+            if 'absolute_errors' in convergence_data['step_convergence']:
+                step_abs_errors = convergence_data['step_convergence']['absolute_errors']
+                ax.semilogy(step_counts, step_abs_errors, 's-', color='red', linewidth=2)
+                ax.set_xlabel('Number of Time Steps')
+                ax.set_ylabel('Absolute Error')
+                ax.set_title('Step Discretization Error: |MC - BS|')
+                ax.grid(True, alpha=0.3)
         
-        # Convergence rate analysis
-        ax = axes[1, 1]
+        # Convergence Summary
+        ax = axes[2, 1] if 'step_convergence' not in convergence_data else plt.subplot2grid((3, 2), (2, 1))
         
         # Calculate convergence rate
         log_n = np.log(path_counts)
@@ -172,23 +212,108 @@ class OptionPricingVisualizer:
         coeffs = np.polyfit(log_n, log_err, 1)
         convergence_rate = coeffs[0]
         
-        ax.text(0.1, 0.9, f'Convergence Rate: {convergence_rate:.3f}',
-               transform=ax.transAxes, fontsize=12, fontweight='bold')
-        ax.text(0.1, 0.8, f'Theoretical Rate: -0.5',
-               transform=ax.transAxes, fontsize=12)
-        ax.text(0.1, 0.7, f'Target Error Achieved: {"Yes" if convergence_data.get("achieved_error") else "No"}',
-               transform=ax.transAxes, fontsize=12)
+        summary_text = f'Path Convergence Summary:\n'
+        summary_text += f'━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        summary_text += f'Convergence Rate: {convergence_rate:.3f}\n'
+        summary_text += f'Theoretical Rate: -0.5\n'
+        summary_text += f'BS Price: ${bs_price:.4f}\n'
         
-        if convergence_data.get('achieved_error'):
-            ax.text(0.1, 0.6, f'Required Paths: {convergence_data["required_paths"]:,}',
-                   transform=ax.transAxes, fontsize=12)
-            ax.text(0.1, 0.5, f'Achieved Error: {convergence_data["achieved_error"]:.2e}',
-                   transform=ax.transAxes, fontsize=12)
+        if 'sigma_atm' in convergence_data:
+            summary_text += f'ATM Volatility: {convergence_data["sigma_atm"]:.2%}\n'
         
+        summary_text += f'\nError Analysis:\n'
+        summary_text += f'━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        
+        # Show errors for each path count
+        for i, n_paths in enumerate(path_counts[:min(5, len(path_counts))]):
+            summary_text += f'{n_paths:,} paths:\n'
+            summary_text += f'  Abs Error: {absolute_errors[i]:.5f}\n'
+            summary_text += f'  Std Error: {std_errors[i]:.5f}\n'
+            if 'confidence_intervals' in convergence_data['path_convergence']:
+                ci = convergence_data['path_convergence']['confidence_intervals'][i]
+                summary_text += f'  95% CI: [{ci["lower"]:.4f}, {ci["upper"]:.4f}]\n'
+        
+        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes, fontsize=9, 
+                verticalalignment='top', fontfamily='monospace')
         ax.set_title('Convergence Summary')
         ax.axis('off')
         
         plt.suptitle('Monte Carlo Convergence Analysis', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.show()
+    
+    def plot_convergence_2d(self, convergence_data: Dict) -> None:
+        """
+        Plot 2D convergence analysis with both paths and steps varying.
+        
+        Args:
+            convergence_data: Dictionary with 2D convergence results
+        """
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        
+        path_counts = convergence_data['path_counts']
+        step_counts = convergence_data['step_counts']
+        error_grid = convergence_data['error_grid']
+        bs_price = convergence_data['bs_price']
+        
+        fig = plt.figure(figsize=(16, 10))
+        
+        # 3D surface plot of absolute errors
+        ax1 = fig.add_subplot(221, projection='3d')
+        P, S = np.meshgrid(path_counts, step_counts)
+        surf = ax1.plot_surface(np.log10(P.T), np.log10(S.T), error_grid, 
+                                cmap='viridis', alpha=0.8)
+        ax1.set_xlabel('log10(Paths)')
+        ax1.set_ylabel('log10(Steps)')
+        ax1.set_zlabel('Absolute Error')
+        ax1.set_title('Convergence Surface: |MC - BS|')
+        fig.colorbar(surf, ax=ax1, shrink=0.5)
+        
+        # Heatmap of absolute errors
+        ax2 = fig.add_subplot(222)
+        im = ax2.imshow(error_grid, cmap='RdYlGn_r', aspect='auto', 
+                       interpolation='nearest')
+        ax2.set_xticks(range(len(step_counts)))
+        ax2.set_xticklabels([str(s) for s in step_counts])
+        ax2.set_yticks(range(len(path_counts)))
+        ax2.set_yticklabels([str(p) for p in path_counts])
+        ax2.set_xlabel('Number of Steps')
+        ax2.set_ylabel('Number of Paths')
+        ax2.set_title('Absolute Error Heatmap')
+        
+        # Add text annotations
+        for i in range(len(path_counts)):
+            for j in range(len(step_counts)):
+                text = ax2.text(j, i, f'{error_grid[i, j]:.4f}',
+                              ha="center", va="center", color="black", fontsize=8)
+        
+        fig.colorbar(im, ax=ax2)
+        
+        # Line plots for fixed steps
+        ax3 = fig.add_subplot(223)
+        for j, n_steps in enumerate(step_counts):
+            ax3.loglog(path_counts, error_grid[:, j], 'o-', 
+                      label=f'{n_steps} steps', alpha=0.7)
+        ax3.set_xlabel('Number of Paths')
+        ax3.set_ylabel('Absolute Error')
+        ax3.set_title('Convergence vs Paths (fixed steps)')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # Line plots for fixed paths
+        ax4 = fig.add_subplot(224)
+        for i, n_paths in enumerate(path_counts):
+            ax4.loglog(step_counts, error_grid[i, :], 's-', 
+                      label=f'{n_paths} paths', alpha=0.7)
+        ax4.set_xlabel('Number of Steps')
+        ax4.set_ylabel('Absolute Error')
+        ax4.set_title('Convergence vs Steps (fixed paths)')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        plt.suptitle(f'2D Monte Carlo Convergence Analysis\nBS Price: ${bs_price:.4f}', 
+                    fontsize=14, fontweight='bold')
         plt.tight_layout()
         plt.show()
     
@@ -365,7 +490,7 @@ class OptionPricingVisualizer:
     def create_convergence_report(self, convergence_data: Dict,
                                  output_file: str = 'convergence_report.html') -> None:
         """
-        Create an HTML report of convergence analysis.
+        Create an HTML report of convergence analysis with enhanced error metrics.
         
         Args:
             convergence_data: Convergence analysis results
@@ -373,75 +498,128 @@ class OptionPricingVisualizer:
         """
         import plotly.subplots as sp
         
-        # Create subplots
+        # Create subplots - adjusted for more plots
         fig = sp.make_subplots(
-            rows=2, cols=2,
-            subplot_titles=('Price Convergence', 'Error Convergence',
+            rows=3, cols=2,
+            subplot_titles=('Price Convergence', 'Absolute Error (|MC - BS|)',
+                          'Standard Error', 'Confidence Interval Width',
                           'Step Convergence', 'Summary Statistics'),
             specs=[[{'type': 'scatter'}, {'type': 'scatter'}],
+                  [{'type': 'scatter'}, {'type': 'scatter'}],
                   [{'type': 'scatter'}, {'type': 'table'}]]
         )
         
-        # Path convergence - prices
+        # Path convergence - prices with BS comparison
         path_counts = convergence_data['path_convergence']['path_counts']
         prices = convergence_data['path_convergence']['prices']
+        bs_price = convergence_data.get('bs_price', prices[-1])
         
         fig.add_trace(
             go.Scatter(x=path_counts, y=prices, mode='lines+markers',
                       name='MC Price', marker=dict(size=8)),
             row=1, col=1
         )
+        fig.add_trace(
+            go.Scatter(x=path_counts, y=[bs_price]*len(path_counts), 
+                      mode='lines', name='BS Price',
+                      line=dict(dash='dash', color='red')),
+            row=1, col=1
+        )
         
-        # Error convergence
+        # Absolute Error convergence
+        if 'absolute_errors' in convergence_data['path_convergence']:
+            absolute_errors = convergence_data['path_convergence']['absolute_errors']
+        else:
+            absolute_errors = [abs(p - bs_price) for p in prices]
+            
+        fig.add_trace(
+            go.Scatter(x=path_counts, y=absolute_errors, mode='lines+markers',
+                      name='|MC - BS|', marker=dict(size=8, color='red')),
+            row=1, col=2
+        )
+        
+        # Standard Error convergence
         std_errors = convergence_data['path_convergence']['std_errors']
         
         fig.add_trace(
             go.Scatter(x=path_counts, y=std_errors, mode='lines+markers',
                       name='Std Error', marker=dict(size=8)),
-            row=1, col=2
+            row=2, col=1
         )
         
+        # Confidence Interval Width
+        if 'confidence_intervals' in convergence_data['path_convergence']:
+            ci_widths = [ci['precision'] for ci in convergence_data['path_convergence']['confidence_intervals']]
+            fig.add_trace(
+                go.Scatter(x=path_counts, y=ci_widths, mode='lines+markers',
+                          name='95% CI Width', marker=dict(size=8, color='purple')),
+                row=2, col=2
+            )
+        
         # Step convergence
-        if 'step_convergence' in convergence_data:
+        if 'step_convergence' in convergence_data and convergence_data['step_convergence']:
             step_counts = convergence_data['step_convergence']['step_counts']
             step_prices = convergence_data['step_convergence']['prices']
             
             fig.add_trace(
                 go.Scatter(x=step_counts, y=step_prices, mode='lines+markers',
-                          name='Price vs Steps', marker=dict(size=8)),
-                row=2, col=1
+                          name='Price vs Steps', marker=dict(size=8, color='green')),
+                row=3, col=1
+            )
+            fig.add_trace(
+                go.Scatter(x=step_counts, y=[bs_price]*len(step_counts), 
+                          mode='lines', name='BS Price',
+                          line=dict(dash='dash', color='red')),
+                row=3, col=1
             )
         
-        # Summary table
+        # Enhanced Summary table with error analysis
         summary_data = [
-            ['Final Price', f'{prices[-1]:.6f}'],
-            ['Final Std Error', f'{std_errors[-1]:.6e}'],
+            ['BS Price', f'${bs_price:.4f}'],
+            ['ATM Volatility', f'{convergence_data.get("sigma_atm", 0):.2%}'],
+            ['Final MC Price', f'${prices[-1]:.4f}'],
+            ['Final Abs Error', f'{absolute_errors[-1]:.5f}'],
+            ['Final Std Error', f'{std_errors[-1]:.5f}'],
+            ['Convergence Rate', f'{np.polyfit(np.log(path_counts), np.log(std_errors), 1)[0]:.3f}'],
             ['Target Error Achieved', 'Yes' if convergence_data.get('achieved_error') else 'No'],
-            ['Required Paths', f'{convergence_data.get("required_paths", "N/A")}'],
-            ['Convergence Rate', f'{np.polyfit(np.log(path_counts), np.log(std_errors), 1)[0]:.3f}']
+            ['Required Paths', f'{convergence_data.get("required_paths", "N/A")}']
         ]
+        
+        # Add confidence interval information
+        if 'confidence_intervals' in convergence_data['path_convergence']:
+            final_ci = convergence_data['path_convergence']['confidence_intervals'][-1]
+            summary_data.append(['Final 95% CI', f'[{final_ci["lower"]:.4f}, {final_ci["upper"]:.4f}]'])
+            summary_data.append(['CI Precision', f'{final_ci["precision"]:.5f}'])
         
         fig.add_trace(
             go.Table(
-                header=dict(values=['Metric', 'Value']),
-                cells=dict(values=list(zip(*summary_data)))
+                header=dict(values=['Metric', 'Value'],
+                          fill_color='lightgray',
+                          align='left'),
+                cells=dict(values=list(zip(*summary_data)),
+                         align='left')
             ),
-            row=2, col=2
+            row=3, col=2
         )
         
         # Update layout
         fig.update_xaxes(title_text="Number of Paths", type="log", row=1, col=1)
         fig.update_xaxes(title_text="Number of Paths", type="log", row=1, col=2)
-        fig.update_xaxes(title_text="Number of Steps", row=2, col=1)
+        fig.update_xaxes(title_text="Number of Paths", type="log", row=2, col=1)
+        fig.update_xaxes(title_text="Number of Paths", type="log", row=2, col=2)
+        fig.update_xaxes(title_text="Number of Steps", row=3, col=1)
         
         fig.update_yaxes(title_text="Option Price", row=1, col=1)
-        fig.update_yaxes(title_text="Standard Error", type="log", row=1, col=2)
-        fig.update_yaxes(title_text="Option Price", row=2, col=1)
+        fig.update_yaxes(title_text="Absolute Error", type="log", row=1, col=2)
+        fig.update_yaxes(title_text="Standard Error", type="log", row=2, col=1)
+        fig.update_yaxes(title_text="CI Width", type="log", row=2, col=2)
+        fig.update_yaxes(title_text="Option Price", row=3, col=1)
         
         fig.update_layout(
             title_text="Monte Carlo Convergence Analysis Report",
             showlegend=True,
-            height=800
+            height=1200,
+            width=1400
         )
         
         # Save to HTML

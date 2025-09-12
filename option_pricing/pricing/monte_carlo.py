@@ -232,11 +232,15 @@ class MonteCarloEngine:
             log_paths[:, 0] = np.log(S0)
             
             for i in range(self.n_steps):
-                t = i * dt
+                # Use the midpoint time for better accuracy
+                t_current = i * dt
+                t_next = (i + 1) * dt
+                t_mid = 0.5 * (t_current + t_next)
                 
                 for j in range(self.n_paths):
                     S = np.exp(log_paths[j, i])
-                    sigma_local = local_vol_func(S, t)
+                    # Use midpoint time for local volatility evaluation
+                    sigma_local = local_vol_func(S, t_mid)
                     
                     # Log-space SDE: d(log S) = (r - q - 0.5*sigma^2)dt + sigma*dW
                     log_paths[j, i + 1] = log_paths[j, i] + \
@@ -248,25 +252,38 @@ class MonteCarloEngine:
         else:
             # Standard simulation
             for i in range(self.n_steps):
-                t = i * dt
+                # Use the midpoint time for better accuracy
+                t_current = i * dt
+                t_next = (i + 1) * dt
+                t_mid = 0.5 * (t_current + t_next)
                 
                 for j in range(self.n_paths):
                     S = paths[j, i]
-                    sigma_local = local_vol_func(S, t)
+                    # Use midpoint time for local volatility evaluation
+                    sigma_local = local_vol_func(S, t_mid)
                     
                     if self.scheme == 'euler':
-                        paths[j, i + 1] = S * (1 + r_adj * dt + sigma_local * dW[j, i])
+                        # Correct Euler scheme: dS = S*r*dt + S*sigma*dW
+                        paths[j, i + 1] = S + S * r_adj * dt + S * sigma_local * dW[j, i]
                     elif self.scheme == 'milstein':
                         # For local vol, we need the derivative of sigma w.r.t. S
-                        # Approximate using finite difference
-                        dS = S * 0.001
-                        sigma_up = local_vol_func(S + dS, t)
-                        dsigma_dS = (sigma_up - sigma_local) / dS
+                        # Approximate using central finite difference
+                        dS = max(S * 0.001, 0.01)  # Ensure minimum perturbation
                         
-                        paths[j, i + 1] = S * (
-                            1 + r_adj * dt + sigma_local * dW[j, i] +
-                            0.5 * sigma_local * S * dsigma_dS * (dW[j, i]**2 - dt)
-                        )
+                        # Central difference for better accuracy
+                        if S > dS:
+                            sigma_up = local_vol_func(S + dS, t_mid)
+                            sigma_down = local_vol_func(S - dS, t_mid)
+                            dsigma_dS = (sigma_up - sigma_down) / (2 * dS)
+                        else:
+                            # Forward difference near zero
+                            sigma_up = local_vol_func(S + dS, t_mid)
+                            dsigma_dS = (sigma_up - sigma_local) / dS
+                        
+                        # Correct Milstein scheme for local volatility
+                        # dS = S*r*dt + S*sigma*dW + 0.5*S^2*sigma*dsigma/dS*(dW^2 - dt)
+                        paths[j, i + 1] = S + S * r_adj * dt + S * sigma_local * dW[j, i] + \
+                                         0.5 * S**2 * sigma_local * dsigma_dS * (dW[j, i]**2 - dt)
         
         return paths
     

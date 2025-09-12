@@ -58,7 +58,7 @@ class OptionDataPuller:
                                     time_to_expiry: float, option_type: str,
                                     dividend_yield: float = 0.0) -> Optional[float]:
         """
-        Calculate implied volatility from option price using Black-Scholes inverse.
+        Calculate implied volatility with enhanced stability and bounds checking.
         
         Args:
             option_price: Market price of the option
@@ -71,10 +71,40 @@ class OptionDataPuller:
         Returns:
             Implied volatility or None if cannot be calculated
         """
+        # Enhanced validation
         if option_price <= 0 or time_to_expiry <= 0:
             return None
+        
+        # Check intrinsic value bounds
+        if option_type == 'call':
+            intrinsic = max(0, spot * np.exp(-dividend_yield * time_to_expiry) - 
+                           strike * np.exp(-self.risk_free_rate * time_to_expiry))
+            if option_price < intrinsic * 0.99:  # Below intrinsic (allowing small numerical error)
+                return None
+            # Upper bound check - option can't be worth more than stock
+            if option_price > spot:
+                return None
+        else:  # put
+            intrinsic = max(0, strike * np.exp(-self.risk_free_rate * time_to_expiry) - 
+                           spot * np.exp(-dividend_yield * time_to_expiry))
+            if option_price < intrinsic * 0.99:
+                return None
+            # Upper bound check - put can't be worth more than strike
+            if option_price > strike * np.exp(-self.risk_free_rate * time_to_expiry):
+                return None
             
         try:
+            # Use more robust IV calculation with better initial guess
+            moneyness = strike / spot
+            
+            # Better initial guess based on moneyness
+            if abs(np.log(moneyness)) < 0.1:  # Near ATM
+                initial_guess = 0.3  # Typical ATM vol
+            elif moneyness < 0.9:  # ITM call / OTM put
+                initial_guess = 0.4
+            else:  # OTM call / ITM put  
+                initial_guess = 0.5
+            
             iv = BlackScholes.implied_volatility(
                 price=option_price,
                 S=spot,
@@ -83,17 +113,17 @@ class OptionDataPuller:
                 r=self.risk_free_rate,
                 q=dividend_yield,
                 option_type=option_type,
-                max_iterations=100,
-                tolerance=1e-6
+                max_iterations=200,  # More iterations
+                tolerance=1e-8  # Tighter tolerance
             )
             
-            # Validate IV is reasonable
-            if iv is not None and 0.01 < iv < 5.0:
+            # Tighter and more realistic IV bounds
+            if iv is not None and 0.05 < iv < 3.0:  # 5% to 300% volatility
                 return iv
             return None
             
-        except Exception as e:
-            print(f"Error calculating IV: {e}")
+        except Exception:
+            # Silent fail for individual options
             return None
     
     def calculate_mid_price(self, bid: float, ask: float, last: float) -> Optional[float]:
@@ -108,16 +138,13 @@ class OptionDataPuller:
         Returns:
             Mid price or None if invalid
         """
-        # Check for valid bid/ask spread
-        if pd.notna(bid) and pd.notna(ask) and bid > 0 and ask > 0:
-            # Validate spread is reasonable (not too wide)
-            spread = (ask - bid) / ask
-            if spread < 0.5:  # Reject if spread > 50%
-                return (bid + ask) / 2
-        
-        # Fall back to last price if available
+        # Always use last price if available
         if pd.notna(last) and last > 0:
             return last
+        
+        # Fall back to bid/ask mid only if last price not available
+        if pd.notna(bid) and pd.notna(ask) and bid > 0 and ask > 0:
+            return (bid + ask) / 2
         
         return None
     
@@ -349,22 +376,41 @@ class OptionDataPuller:
             return pd.concat(atm_options, ignore_index=True)
         return pd.DataFrame()
     
-    def get_full_surface_data(self, num_expirations: int = 10,
-                             moneyness_range: Tuple[float, float] = (0.7, 1.3)) -> pd.DataFrame:
+    def get_full_surface_data(self, num_expirations: int = None,
+                             moneyness_range: Tuple[float, float] = None,
+                             min_price: float = 0.01,
+                             min_volume: int = 0,
+                             min_open_interest: int = 0,
+                             max_iv: float = 5.0) -> pd.DataFrame:
         """
-        Get comprehensive option data for volatility surface construction.
+        Get comprehensive option data with minimal filters to capture full volatility surface.
         
         Args:
-            num_expirations: Number of expiration dates to fetch
-            moneyness_range: Range of moneyness to include
+            num_expirations: Number of expiration dates to fetch (None = all available)
+            moneyness_range: Range of moneyness to include (None = all strikes)
+            min_price: Minimum option price to include (very low to capture all valid prices)
+            min_volume: Minimum daily volume (0 to include all)
+            min_open_interest: Minimum open interest (0 to include all)
+            max_iv: Maximum implied volatility to accept (increased for edge cases)
             
         Returns:
-            DataFrame with filtered option data suitable for vol surface
+            DataFrame with comprehensive option data for vol surface
         """
-        expirations = self.get_option_expirations()[:num_expirations]
+        # Get ALL available expirations
+        all_expirations = self.get_option_expirations()
+        
+        if num_expirations is None:
+            expirations = all_expirations
+        else:
+            expirations = all_expirations[:num_expirations]
+        
         all_options = []
         
         print(f"Fetching {len(expirations)} expirations for {self.ticker}...")
+        if moneyness_range:
+            print(f"  Moneyness range: {moneyness_range[0]:.1f} - {moneyness_range[1]:.1f}")
+        else:
+            print(f"  Using all available strikes (no moneyness filter)")
         
         for i, exp in enumerate(expirations):
             print(f"  Processing expiration {i+1}/{len(expirations)}: {exp}")
@@ -372,23 +418,42 @@ class OptionDataPuller:
             
             for df in [chain_data['calls'], chain_data['puts']]:
                 if not df.empty:
-                    # Filter by moneyness range
-                    filtered_df = df[
-                        (df['moneyness'] >= moneyness_range[0]) & 
-                        (df['moneyness'] <= moneyness_range[1])
+                    initial_count = len(df)
+                    
+                    # Start with all options or apply moneyness range if specified
+                    if moneyness_range:
+                        filtered_df = df[
+                            (df['moneyness'] >= moneyness_range[0]) & 
+                            (df['moneyness'] <= moneyness_range[1])
+                        ].copy()
+                    else:
+                        filtered_df = df.copy()
+                    
+                    # Minimal filtering - only require valid last price and basic price filter
+                    filtered_df = filtered_df[
+                        filtered_df['mid'].notna() & 
+                        (filtered_df['mid'] > min_price)
                     ]
                     
-                    # Only keep options with valid calculated implied volatility
+                    # Apply liquidity filters only if specified (default is 0 = no filter)
+                    if min_volume > 0:
+                        filtered_df = filtered_df[filtered_df['volume'].fillna(0) >= min_volume]
+                    if min_open_interest > 0:
+                        filtered_df = filtered_df[filtered_df['openInterest'].fillna(0) >= min_open_interest]
+                    
+                    # Only filter out clearly invalid implied volatilities
                     filtered_df = filtered_df[
                         (filtered_df['calculatedIV'].notna()) & 
-                        (filtered_df['calculatedIV'] > 0.01) &
-                        (filtered_df['calculatedIV'] < 5.0)  # Remove extreme IVs
+                        (filtered_df['calculatedIV'] > 0.01) &  # 1% minimum (very low threshold)
+                        (filtered_df['calculatedIV'] < max_iv)  # Filter only extreme outliers
                     ]
                     
                     # Update impliedVolatility to use our calculated values
                     filtered_df['impliedVolatility'] = filtered_df['calculatedIV']
                     
-                    all_options.append(filtered_df)
+                    if len(filtered_df) > 0:
+                        print(f"    Kept {len(filtered_df)}/{initial_count} {df['optionType'].iloc[0].lower()}s with valid prices")
+                        all_options.append(filtered_df)
         
         if all_options:
             full_data = pd.concat(all_options, ignore_index=True)
@@ -401,6 +466,7 @@ class OptionDataPuller:
             print(f"  Total options: {len(full_data)}")
             print(f"  Unique expirations: {full_data['expiration'].nunique()}")
             print(f"  Strike range: ${full_data['strike'].min():.2f} - ${full_data['strike'].max():.2f}")
+            print(f"  Moneyness range: {full_data['moneyness'].min():.2f} - {full_data['moneyness'].max():.2f}")
             print(f"  IV range: {full_data['impliedVolatility'].min():.2%} - {full_data['impliedVolatility'].max():.2%}")
             
             return full_data
@@ -456,9 +522,9 @@ def main():
         }).round(4)
         print(summary)
     
-    # Get full surface data
+    # Get full surface data - using all available strikes and expiries
     print("\nFetching full surface data...")
-    surface_data = puller.get_full_surface_data(num_expirations=5)
+    surface_data = puller.get_full_surface_data()
     
     if not surface_data.empty:
         # Save the data

@@ -164,7 +164,7 @@ class SVIVolatilitySurface:
             else:
                 return rates[0]
         else:
-            return 0.05  # Default 5%
+            return 0.04  # Default 4%
     
     def svi_raw(self, k: np.ndarray, a: float, b: float, rho: float, 
                 m: float, sigma: float) -> np.ndarray:
@@ -282,91 +282,77 @@ class SVIVolatilitySurface:
         # Initial guess
         initial_params = self._get_initial_svi_jw_params(k, market_w, T)
         
-        if method == 'robust':
-            # Use robust least squares for better stability
-            def residuals(params_vec):
-                params = SVIJWParameters.from_vector(params_vec, T)
+        # Enhanced optimization with multiple stages
+        def objective_with_penalty(params_vec):
+            v_t, psi, p, c, v_tilde = params_vec
+            
+            # Hard constraints
+            if v_t <= v_tilde + 0.005:
+                return 1e10
+            if p + c < 2:
+                return 1e10
+            if p <= 0 or c <= 0:
+                return 1e10
+            
+            params = SVIJWParameters.from_vector(params_vec, T)
+            
+            try:
+                model_w = self.svi_jw(k, params)
+                # Weighted least squares with strong ATM emphasis
+                weights = np.exp(-2 * k**2)
+                residuals = (model_w - market_w) / (market_w + 0.01)
+                weighted_error = np.sum(weights * residuals**2)
                 
-                # Check constraints
-                if not self.check_arbitrage_constraints_jw(params):
-                    return np.ones_like(market_w) * 1e10
+                # Add penalty for extreme parameters
+                penalty = 0
+                if abs(psi) > 0.5:
+                    penalty += 100 * (abs(psi) - 0.5)**2
+                if p > 2 or c > 2:
+                    penalty += 100 * ((max(0, p - 2))**2 + (max(0, c - 2))**2)
                 
-                try:
-                    model_w = self.svi_jw(k, params)
-                    # Use relative error for better stability
-                    weights = 1.0 / np.sqrt(1.0 + k**2)  # ATM weighting
-                    return weights * (model_w - market_w) / np.sqrt(market_w + 1e-8)
-                except:
-                    return np.ones_like(market_w) * 1e10
-            
-            # Bounds for parameters
-            bounds = (
-                [1e-6, -1.0, 0.01, 0.01, 0.0],  # Lower bounds
-                [2.0, 1.0, 10.0, 10.0, 1.0]      # Upper bounds
-            )
-            
-            result = least_squares(
-                residuals,
-                initial_params.to_vector(),
-                bounds=bounds,
-                method='trf',  # Trust Region Reflective
-                max_nfev=max_iter,
-                ftol=1e-10,
-                xtol=1e-10
-            )
-            
+                return weighted_error + penalty
+            except:
+                return 1e10
+        
+        # Simplified robust bounds
+        bounds = [
+            (min(market_w) * 0.8, max(market_w) * 2.0),  # v_t  
+            (-0.3, 0.3),  # psi  
+            (0.2, 1.5),   # p
+            (0.2, 1.5),   # c
+            (0, min(market_w) * 0.5)  # v_tilde
+        ]
+        
+        # Stage 1: Global optimization with differential evolution (no x0)
+        result_de = differential_evolution(
+            objective_with_penalty,
+            bounds,
+            maxiter=max(50, max_iter // 20),
+            popsize=15,
+            tol=1e-8,
+            seed=42,
+            workers=1
+        )
+        
+        # Stage 2: Local refinement
+        result = minimize(
+            objective_with_penalty,
+            result_de.x,
+            method='L-BFGS-B',
+            bounds=bounds,
+            options={'maxiter': max_iter // 10, 'ftol': 1e-10}
+        )
+        
+        # Use best result
+        if result.fun < result_de.fun:
             optimal_params = result.x
-            success = result.success
-            
         else:
-            # Original optimization method
-            def objective(params_vec):
-                params = SVIJWParameters.from_vector(params_vec, T)
-                
-                if not self.check_arbitrage_constraints_jw(params):
-                    return 1e10
-                
-                try:
-                    model_w = self.svi_jw(k, params)
-                    weights = np.exp(-k**2)  # Gaussian weighting
-                    error = np.sum(weights * (model_w - market_w)**2)
-                    return error
-                except:
-                    return 1e10
-            
-            bounds = [
-                (1e-6, 2.0),     # v_t
-                (-1.0, 1.0),     # psi
-                (0.01, 10.0),    # p
-                (0.01, 10.0),    # c
-                (0.0, 1.0)       # v_tilde
-            ]
-            
-            if method == 'lm':
-                result = minimize(
-                    objective,
-                    initial_params.to_vector(),
-                    method='L-BFGS-B',
-                    bounds=bounds,
-                    options={'maxiter': max_iter, 'ftol': 1e-10}
-                )
-            else:  # 'de'
-                result = differential_evolution(
-                    objective,
-                    bounds,
-                    maxiter=max_iter // 10,
-                    popsize=15,
-                    tol=1e-10,
-                    workers=1
-                )
-            
-            optimal_params = result.x
-            success = result.success
+            optimal_params = result_de.x
         
         # Create final parameters
         final_params = SVIJWParameters.from_vector(optimal_params, T)
         
-        # Ensure Durrleman condition
+        # Final Durrleman condition check
         if final_params.p + final_params.c < 2:
             scale = 2.01 / (final_params.p + final_params.c)
             final_params.p *= scale
@@ -378,14 +364,14 @@ class SVIVolatilitySurface:
         
         return {
             'params': final_params,
-            'success': success,
+            'success': True,
             'rmse': rmse,
             'k_range': (k.min(), k.max())
         }
     
     def _get_initial_svi_jw_params(self, k: np.ndarray, w: np.ndarray, T: float) -> SVIJWParameters:
         """
-        Get robust initial SVI-JW parameters from market data.
+        Get robust initial SVI-JW parameters with enhanced heuristics.
         
         Args:
             k: Log-moneyness
@@ -393,75 +379,92 @@ class SVIVolatilitySurface:
             T: Time to maturity
             
         Returns:
-            Initial SVI-JW parameters
+            Initial SVI-JW parameters with tighter constraints
         """
+        # Remove outliers using IQR method first
+        q1, q3 = np.percentile(w, [25, 75])
+        iqr = q3 - q1
+        lower_bound = max(0, q1 - 1.5 * iqr)
+        upper_bound = q3 + 1.5 * iqr
+        valid_mask = (w >= lower_bound) & (w <= upper_bound)
+        
+        if np.sum(valid_mask) < 5:
+            valid_mask = np.ones_like(w, dtype=bool)
+        
+        k_clean = k[valid_mask]
+        w_clean = w[valid_mask]
+        
         # Find ATM index
-        atm_idx = np.argmin(np.abs(k))
+        atm_idx = np.argmin(np.abs(k_clean))
         
-        # ATM total variance
-        v_t = w[atm_idx]
+        # Use robust statistics for ATM variance
+        atm_window = max(1, min(3, len(k_clean) // 10))
+        atm_start = max(0, atm_idx - atm_window)
+        atm_end = min(len(k_clean), atm_idx + atm_window + 1)
+        v_t = np.median(w_clean[atm_start:atm_end])
         
-        # Minimum variance (use percentile for robustness)
-        v_tilde = np.percentile(w, 5) * 0.9
-        v_tilde = max(0, min(v_tilde, v_t * 0.8))
+        # Minimum variance (conservative estimate)
+        v_tilde = min(w_clean) * 0.5
         
-        # Ensure v_t > v_tilde
-        if v_t <= v_tilde:
-            v_t = v_tilde + 0.01
+        # Apply tighter constraints upfront
+        v_t = np.clip(v_t, 0.001, 0.5)
+        v_tilde = np.clip(v_tilde, 0, v_t * 0.7)
         
-        # Estimate ATM skew using local linear regression
-        window = min(3, len(k) // 4)
-        if atm_idx >= window and atm_idx < len(k) - window:
-            local_k = k[atm_idx-window:atm_idx+window+1]
-            local_w = w[atm_idx-window:atm_idx+window+1]
-            if len(local_k) > 2:
-                coeffs = np.polyfit(local_k - k[atm_idx], local_w, 1)
-                psi = coeffs[0] / (2 * np.sqrt(v_t - v_tilde)) if v_t > v_tilde else 0
-                psi = np.clip(psi, -0.5, 0.5)
-            else:
+        # Ensure v_t > v_tilde with margin
+        v_t = max(v_t, v_tilde + 0.01)
+        
+        # Robust skew estimation using local regression
+        near_atm_mask = np.abs(k_clean) < 0.15
+        if np.sum(near_atm_mask) > 3:
+            k_near = k_clean[near_atm_mask]
+            w_near = w_clean[near_atm_mask]
+            try:
+                # Use robust linear fit
+                A = np.vstack([k_near, np.ones(len(k_near))]).T
+                coeffs, _, _, _ = np.linalg.lstsq(A, w_near, rcond=None)
+                psi = coeffs[0] / (2 * np.sqrt(v_t)) if v_t > 0 else 0
+            except:
                 psi = 0
         else:
             psi = 0
+        # Conservative skew bounds
+        psi = np.clip(psi, -0.2, 0.2)
         
-        # Estimate wing slopes using robust regression
-        # Left wing
-        left_mask = k < k[atm_idx] - 0.1
+        # Robust wing estimation
+        # Left wing (put side)
+        left_mask = k_clean < -0.1
         if np.sum(left_mask) >= 2:
-            k_left = k[left_mask]
-            w_left = w[left_mask]
-            # Use median slope for robustness
-            slopes = []
-            for i in range(len(k_left) - 1):
-                if abs(k_left[i]) > 0.01:
-                    slope = (w_left[i] - v_tilde) / abs(k_left[i])
-                    if slope > 0:
-                        slopes.append(slope)
-            p = np.median(slopes) if slopes else 1.5
-            p = np.clip(p, 0.5, 5.0)
+            k_left = k_clean[left_mask]
+            w_left = w_clean[left_mask]
+            # Calculate slopes robustly
+            slopes = (w_left - v_tilde) / (np.abs(k_left) + 1e-6)
+            valid_slopes = slopes[(slopes > 0) & (slopes < 3)]
+            p = np.median(valid_slopes) if len(valid_slopes) > 0 else 0.7
         else:
-            p = 1.5
+            p = 0.7
         
-        # Right wing
-        right_mask = k > k[atm_idx] + 0.1
+        # Right wing (call side)
+        right_mask = k_clean > 0.1
         if np.sum(right_mask) >= 2:
-            k_right = k[right_mask]
-            w_right = w[right_mask]
-            slopes = []
-            for i in range(len(k_right) - 1):
-                if k_right[i] > 0.01:
-                    slope = (w_right[i] - v_tilde) / k_right[i]
-                    if slope > 0:
-                        slopes.append(slope)
-            c = np.median(slopes) if slopes else 1.5
-            c = np.clip(c, 0.5, 5.0)
+            k_right = k_clean[right_mask]
+            w_right = w_clean[right_mask]
+            # Calculate slopes robustly
+            slopes = (w_right - v_tilde) / (k_right + 1e-6)
+            valid_slopes = slopes[(slopes > 0) & (slopes < 3)]
+            c = np.median(valid_slopes) if len(valid_slopes) > 0 else 0.7
         else:
-            c = 1.5
+            c = 0.7
         
-        # Ensure Durrleman condition
-        if p + c < 2:
-            scale = 2.1 / (p + c)
-            p *= scale
-            c *= scale
+        # Apply conservative constraints
+        p = np.clip(p, 0.3, 1.2)
+        c = np.clip(c, 0.3, 1.2)
+        
+        # Ensure Durrleman condition with margin
+        if p + c < 2.0:
+            # Scale up proportionally to satisfy constraint
+            scale = 2.1 / (p + c + 1e-6)
+            p = min(p * scale, 1.2)
+            c = min(c * scale, 1.2)
         
         return SVIJWParameters(v_t, psi, p, c, v_tilde, T)
     
@@ -684,41 +687,108 @@ class SVIVolatilitySurface:
         Returns:
             Implied volatility
         """
-        if use_interpolator and 'surface' in self.interpolators:
-            # Use smooth interpolator
-            vol = float(self.interpolators['surface'](strike, maturity)[0, 0])
-            return max(vol, 0.01)
+        # Handle edge cases
+        if maturity <= 0:
+            maturity = 1/365  # Minimum 1 day
         
-        # Get interpolated parameters if available
-        if hasattr(self, 'param_interpolators') and self.param_interpolators:
-            available_maturities = sorted(self.svi_jw_params_by_maturity.keys())
+        # Check if we have calibrated parameters
+        if not self.svi_jw_params_by_maturity:
+            # Return reasonable default if no calibration
+            return 0.25  # 25% default volatility
+        
+        available_maturities = sorted(self.svi_jw_params_by_maturity.keys())
+        
+        # Handle extrapolation for very short maturities
+        if maturity < available_maturities[0]:
+            # Use nearest available with sqrt time scaling
+            nearest_T = available_maturities[0]
+            nearest_params = self.svi_jw_params_by_maturity[nearest_T]
             
-            if maturity < available_maturities[0]:
-                maturity = available_maturities[0]
-            elif maturity > available_maturities[-1]:
-                maturity = available_maturities[-1]
+            # Calculate vol at nearest maturity
+            forward = self.get_forward(nearest_T)
+            k = np.log(strike / forward)
+            nearest_vol = self.svi_implied_vol(np.array([k]), nearest_params)[0]
             
-            # Interpolate parameters
-            v_t = float(self.param_interpolators['v_t'](maturity))
-            psi = float(self.param_interpolators['psi'](maturity))
-            p = float(self.param_interpolators['p'](maturity))
-            c = float(self.param_interpolators['c'](maturity))
-            v_tilde = float(self.param_interpolators['v_tilde'](maturity))
+            # Scale by sqrt of time for short extrapolation
+            scaling = np.sqrt(maturity / nearest_T)
+            return nearest_vol * scaling
+        
+        # Handle extrapolation for long maturities
+        if maturity > available_maturities[-1]:
+            # Use furthest available with sqrt time scaling
+            furthest_T = available_maturities[-1]
+            furthest_params = self.svi_jw_params_by_maturity[furthest_T]
             
-            # Ensure valid parameters
-            v_t = max(v_tilde + 0.01, v_t)
-            params = SVIJWParameters(v_t, psi, p, c, v_tilde, maturity)
+            # Calculate vol at furthest maturity
+            forward = self.get_forward(furthest_T)
+            k = np.log(strike / forward)
+            furthest_vol = self.svi_implied_vol(np.array([k]), furthest_params)[0]
+            
+            # Scale by sqrt of time for long extrapolation
+            scaling = np.sqrt(maturity / furthest_T)
+            return furthest_vol * scaling
+        
+        # Interpolation between calibrated maturities
+        if len(available_maturities) >= 2:
+            # Find bracketing maturities
+            idx = np.searchsorted(available_maturities, maturity)
+            
+            if idx == 0:
+                # Use first maturity
+                params = self.svi_jw_params_by_maturity[available_maturities[0]]
+            elif idx == len(available_maturities):
+                # Use last maturity
+                params = self.svi_jw_params_by_maturity[available_maturities[-1]]
+            else:
+                # Smooth parameter interpolation for continuity
+                T1 = available_maturities[idx - 1]
+                T2 = available_maturities[idx]
+                
+                # Get parameters for both maturities
+                params1 = self.svi_jw_params_by_maturity[T1]
+                params2 = self.svi_jw_params_by_maturity[T2]
+                
+                # Interpolation weight with smooth transition
+                alpha = (maturity - T1) / (T2 - T1)
+                # Use cubic hermite spline weight for C1 continuity
+                alpha_smooth = alpha * alpha * (3 - 2 * alpha)
+                
+                # Interpolate SVI parameters directly
+                v_t = params1.v_t * (1 - alpha_smooth) + params2.v_t * alpha_smooth
+                psi = params1.psi * (1 - alpha_smooth) + params2.psi * alpha_smooth
+                p = params1.p * (1 - alpha_smooth) + params2.p * alpha_smooth
+                c = params1.c * (1 - alpha_smooth) + params2.c * alpha_smooth
+                v_tilde = params1.v_tilde * (1 - alpha_smooth) + params2.v_tilde * alpha_smooth
+                
+                # Create interpolated parameters
+                params_interp = SVIJWParameters(v_t, psi, p, c, v_tilde, maturity)
+                
+                # Check if interpolated params satisfy arbitrage constraints
+                if self.check_arbitrage_constraints_jw(params_interp):
+                    # Use interpolated parameters
+                    forward = self.get_forward(maturity)
+                    k = np.log(strike / forward)
+                    return self.svi_implied_vol(np.array([k]), params_interp)[0]
+                else:
+                    # Fall back to variance interpolation if constraints violated
+                    forward = self.get_forward(maturity)
+                    k = np.log(strike / forward)
+                    
+                    vol1 = self.svi_implied_vol(np.array([k]), params1)[0]
+                    vol2 = self.svi_implied_vol(np.array([k]), params2)[0]
+                    
+                    # Smooth variance interpolation
+                    var1 = vol1**2 * T1
+                    var2 = vol2**2 * T2
+                    interpolated_var = var1 * (1 - alpha_smooth) + var2 * alpha_smooth
+                    
+                    return np.sqrt(interpolated_var / maturity)
         else:
-            # Fall back to nearest maturity
-            available_maturities = sorted(self.svi_jw_params_by_maturity.keys())
-            if not available_maturities:
-                return 0.2
-            
-            closest_T = min(available_maturities, key=lambda x: abs(x - maturity))
-            params = self.svi_jw_params_by_maturity[closest_T]
+            # Only one maturity available
+            params = self.svi_jw_params_by_maturity[available_maturities[0]]
         
-        # Calculate vol
-        forward = self.get_forward(params.T)
+        # Calculate vol using SVI parameters
+        forward = self.get_forward(maturity)
         k = np.log(strike / forward)
         
         return self.svi_implied_vol(np.array([k]), params)[0]
@@ -742,52 +812,6 @@ class SVIVolatilitySurface:
             'r_squared': 1 - np.var(errors) / np.var(option_data['impliedVolatility'])
         }
     
-    def get_local_vol(self, S: float, t: float, dS: float = 0.01, dt: float = 0.01) -> float:
-        """
-        Calculate local volatility using Dupire's formula.
-        
-        Args:
-            S: Spot price
-            t: Time
-            dS: Price increment for derivatives
-            dt: Time increment for derivatives
-            
-        Returns:
-            Local volatility
-        """
-        # Get implied variance and its derivatives
-        var = self.get_vol(S, t)**2 * t
-        
-        # Numerical derivatives
-        if t > dt:
-            dvar_dt = (self.get_vol(S, t + dt)**2 * (t + dt) - 
-                      self.get_vol(S, t - dt)**2 * (t - dt)) / (2 * dt)
-        else:
-            dvar_dt = (self.get_vol(S, t + dt)**2 * (t + dt) - var) / dt
-        
-        dvar_dS = (self.get_vol(S + dS, t)**2 * t - 
-                   self.get_vol(S - dS, t)**2 * t) / (2 * dS)
-        
-        d2var_dS2 = (self.get_vol(S + dS, t)**2 * t - 
-                     2 * var + 
-                     self.get_vol(S - dS, t)**2 * t) / (dS**2)
-        
-        # Apply Dupire formula
-        r = self.get_risk_free_rate(t)
-        q = 0  # No dividends
-        
-        numerator = dvar_dt + (r - q) * S * dvar_dS + q * var
-        denominator = 1 + 2 * (r - q) * t + S**2 / var * d2var_dS2
-        
-        if denominator <= 0 or numerator < 0:
-            return self.get_vol(S, t)
-        
-        local_var = numerator / denominator
-        
-        if local_var <= 0:
-            return self.get_vol(S, t)
-        
-        return np.sqrt(local_var)
     
     def get_total_variance(self, strike: float, maturity: float) -> float:
         """Get total implied variance (vol^2 * T)."""

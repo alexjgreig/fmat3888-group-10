@@ -165,6 +165,121 @@ class BlackScholes:
         return -np.exp(-q * T) * norm.pdf(d1) * d2 / sigma
     
     @staticmethod
+    def barrier_option_price(S: float, K: float, H: float, T: float, r: float, 
+                           sigma: float, q: float = 0, 
+                           barrier_type: str = 'down-out', 
+                           option_type: str = 'call') -> float:
+        """
+        Calculate barrier option price using Black-Scholes formula.
+        
+        Args:
+            S: Current stock price
+            K: Strike price
+            H: Barrier level
+            T: Time to maturity
+            r: Risk-free rate
+            sigma: Volatility
+            q: Dividend yield
+            barrier_type: 'down-out', 'up-out', 'down-in', 'up-in'
+            option_type: 'call' or 'put'
+            
+        Returns:
+            Barrier option price
+        """
+        if T <= 0:
+            # At expiry, check if barrier has been hit
+            if barrier_type == 'down-out' and S <= H:
+                return 0
+            elif barrier_type == 'up-out' and S >= H:
+                return 0
+            elif barrier_type == 'down-in' and S > H:
+                return 0
+            elif barrier_type == 'up-in' and S < H:
+                return 0
+            else:
+                return max(S - K, 0) if option_type == 'call' else max(K - S, 0)
+        
+        # Parameters
+        mu = (r - q - 0.5 * sigma**2) / sigma**2
+        lambda_val = np.sqrt(mu**2 + 2 * r / sigma**2)
+        
+        # For down-and-out call
+        if barrier_type == 'down-out' and option_type == 'call':
+            if S <= H:
+                return 0  # Already knocked out
+            
+            # Standard call value
+            vanilla_call = BlackScholes.call_price(S, K, T, r, sigma, q)
+            
+            if K > H:
+                # Rebate terms
+                x1 = np.log(S/H) / (sigma * np.sqrt(T)) + lambda_val * sigma * np.sqrt(T)
+                y = np.log(H**2 / (S*K)) / (sigma * np.sqrt(T)) + lambda_val * sigma * np.sqrt(T)
+                y1 = np.log(H/S) / (sigma * np.sqrt(T)) + lambda_val * sigma * np.sqrt(T)
+                
+                knock_out_term = (H/S)**(2*lambda_val) * (
+                    norm.cdf(y) - norm.cdf(y1)
+                ) * K * np.exp(-r * T)
+                
+                knock_out_term += (H/S)**(2*lambda_val - 2) * (
+                    norm.cdf(y - sigma * np.sqrt(T)) - 
+                    norm.cdf(y1 - sigma * np.sqrt(T))
+                ) * S * np.exp(-q * T)
+                
+                return vanilla_call - knock_out_term
+            else:
+                return vanilla_call
+        
+        # For down-and-out put
+        elif barrier_type == 'down-out' and option_type == 'put':
+            if S <= H:
+                return 0
+            
+            vanilla_put = BlackScholes.put_price(S, K, T, r, sigma, q)
+            
+            if K > H:
+                # Put specific terms
+                x1 = np.log(S/H) / (sigma * np.sqrt(T)) + lambda_val * sigma * np.sqrt(T)
+                y = np.log(H**2 / (S*K)) / (sigma * np.sqrt(T)) + lambda_val * sigma * np.sqrt(T)
+                
+                knock_out_term = -(H/S)**(2*lambda_val - 2) * (
+                    norm.cdf(-y + sigma * np.sqrt(T))
+                ) * S * np.exp(-q * T)
+                
+                knock_out_term += (H/S)**(2*lambda_val) * (
+                    norm.cdf(-y)
+                ) * K * np.exp(-r * T)
+                
+                return vanilla_put - knock_out_term
+            else:
+                # K <= H case
+                return 0
+        
+        # For up-and-out options (mirror of down-and-out)
+        elif barrier_type == 'up-out':
+            if S >= H:
+                return 0
+            
+            # Use symmetry: up-out with barrier H is like down-out with transformed parameters
+            # This is a simplified implementation
+            if option_type == 'call':
+                return BlackScholes.call_price(S, K, T, r, sigma, q) * (S < H)
+            else:
+                return BlackScholes.put_price(S, K, T, r, sigma, q) * (S < H)
+        
+        # For knock-in options (complementary to knock-out)
+        elif 'in' in barrier_type:
+            # Knock-in = Vanilla - Knock-out
+            out_type = barrier_type.replace('in', 'out')
+            vanilla_price = (BlackScholes.call_price(S, K, T, r, sigma, q) if option_type == 'call'
+                           else BlackScholes.put_price(S, K, T, r, sigma, q))
+            out_price = BlackScholes.barrier_option_price(S, K, H, T, r, sigma, q, out_type, option_type)
+            return vanilla_price - out_price
+        
+        else:
+            raise ValueError(f"Unknown barrier type: {barrier_type}")
+    
+    @staticmethod
     def implied_volatility(price: float, S: float, K: float, T: float, r: float,
                           q: float = 0, option_type: str = 'call',
                           max_iterations: int = 100, tolerance: float = 1e-6) -> Optional[float]:
