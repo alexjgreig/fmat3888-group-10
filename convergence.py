@@ -212,7 +212,7 @@ def run_convergence_analysis():
     print("\nBarrier Option (Down-and-Out):")
     print("-" * 40)
     
-    for n_paths in path_counts[:5]:  # Fewer paths for barrier (slower)
+    for n_paths in path_counts:  # Fewer paths for barrier (slower)
         # Euler - Barrier
         result_euler = analyzer.price_barrier_option(K, H, T, n_paths, fixed_steps, 'down-out', 'put', 'euler')
         euler_barrier_results.append(result_euler)
