@@ -240,7 +240,7 @@ def main():
     print(f"  Standard Error: {lv_euro_result['std_error']:.6f}")
     
     # Price Barrier Option
-    H = spot_price * 0.85  # 15% down barrier
+    H = spot_price * 0.80  # 15% down barrier
     
     print(f"\nPricing Down-and-Out Put Option (K=${K:.2f}, H=${H:.2f}, T={T}y):")
     
