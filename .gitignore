@@ -33,6 +33,7 @@ coverage.xml
 
 # Report folder (generated documents)
 report/
+charts_old/
 
 # Data and model files
 *.pkl
