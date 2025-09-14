@@ -224,7 +224,7 @@ def main():
     
     # Price European option with local vol
     K = spot_price  # ATM option
-    T = 1.0  # 1 year maturity
+    T = 0.5  # 1 year maturity
     
     print(f"\nPricing European Call Option (K=${K:.2f}, T={T}y):")
     print("Using Local Volatility Monte Carlo...")
@@ -240,155 +240,20 @@ def main():
     print(f"  Standard Error: {lv_euro_result['std_error']:.6f}")
     
     # Price Barrier Option
-    H = spot_price * 0.80  # 15% down barrier
+    H = spot_price * 0.85  # 15% down barrier
     
     print(f"\nPricing Down-and-Out Put Option (K=${K:.2f}, H=${H:.2f}, T={T}y):")
     
     lv_barrier_result = local_vol_model.price_barrier_option(
         K=K, H=H, T=T,
         barrier_type='down-out', option_type='put',
-        n_paths=10000, n_steps=100  # Reduced complexity
+        n_paths=10000, n_steps=1000  # Reduced complexity
     )
     
     print(f"  Local Vol Barrier Price: ${lv_barrier_result['price']:.4f}")
     print(f"  Black-Scholes Barrier Price: ${lv_barrier_result['bs_price']:.4f}")
     print(f"  Knock-out Probability: {1 - lv_barrier_result['knock_probability']:.2%}")
     print(f"  Standard Error: {lv_barrier_result['std_error']:.6f}")
-    
-    # Convergence Analysis with specified path counts
-    print(f"\nAnalyzing convergence with path and step variations...")
-    
-    '''
-    # Use the requested path counts
-    path_counts = [2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,100000]
-    # Add step counts for convergence analysis
-    step_counts = [2,4,8,16,32,64,128,256,512,1024,2048]
-    
-    convergence_result = local_vol_model.analyze_convergence(
-        K=K, T=T, option_type='call',
-        path_counts=path_counts,
-        step_counts=step_counts,
-        target_error=TARGET_ERROR,
-        fast_mode=False  # Enable fast mode for quicker execution
-    )
-    
-    # Display convergence results with enhanced error analysis
-    print("\n" + "="*60)
-    print("CONVERGENCE ANALYSIS RESULTS")
-    print("="*60)
-    
-    # Display Black-Scholes benchmark price
-    if 'bs_price' in convergence_result:
-        print(f"\nBlack-Scholes Benchmark Price: ${convergence_result['bs_price']:.4f}")
-        print(f"ATM Volatility Used: {convergence_result['sigma_atm']:.2%}")
-    
-    # Display path convergence results
-    print("\nPath Convergence Results:")
-    print("-" * 50)
-    path_data = convergence_result['path_convergence']
-    print(f"{'Paths':>10} | {'MC Price':>10} | {'Abs Error':>10} | {'Std Error':>10} | {'95% CI Width':>12}")
-    print("-" * 65)
-    
-    for i, n_paths in enumerate(path_data['path_counts']):
-        mc_price = path_data['prices'][i]
-        abs_err = path_data['absolute_errors'][i]
-        std_err = path_data['std_errors'][i]
-        ci_width = path_data['confidence_intervals'][i]['precision']
-        
-        print(f"{n_paths:>10,} | ${mc_price:>9.4f} | {abs_err:>10.5f} | {std_err:>10.5f} | {ci_width:>12.5f}")
-    
-    # Display step convergence results if available
-    if 'step_convergence' in convergence_result and convergence_result['step_convergence']:
-        print("\nStep Convergence Results (with 10,000 paths):")
-        print("-" * 50)
-        step_data = convergence_result['step_convergence']
-        print(f"{'Steps':>8} | {'MC Price':>10} | {'Abs Error':>10} | {'Std Error':>10}")
-        print("-" * 50)
-        
-        for i, n_steps in enumerate(step_data['step_counts']):
-            mc_price = step_data['prices'][i]
-            abs_err = step_data['absolute_errors'][i]
-            std_err = step_data['std_errors'][i]
-            
-            print(f"{n_steps:>8} | ${mc_price:>9.4f} | {abs_err:>10.5f} | {std_err:>10.5f}")
-    
-    if convergence_result['achieved_error']:
-        print(f"\n✓ Target error {TARGET_ERROR} achieved!")
-        print(f"  Required paths: {convergence_result['required_paths']:,}")
-        print(f"  Achieved error: {convergence_result['achieved_error']:.2e}")
-    else:
-        print(f"\n✗ Target error not achieved with tested path counts")
-        print(f"  Best error: {min(convergence_result['path_convergence']['std_errors']):.2e}")
-    
-    # Plot convergence
-    print("\nGenerating enhanced convergence plots...")
-    visualizer.plot_convergence(convergence_result, target_error=TARGET_ERROR)
-    
-    # 2D Convergence Analysis with both paths and steps varying
-    print("\n" + "="*60)
-    print("2D CONVERGENCE ANALYSIS (Paths × Steps)")
-    print("="*60)
-    
-    print("\nRunning 2D convergence analysis with both paths and steps varying...")
-    convergence_2d_result = local_vol_model.analyze_convergence_2d(
-        K=K, T=T, option_type='call',
-        path_counts = [2,4,8,16,32,64,128,256,512,1024,2048],
-        step_counts = [2,4,8,16,32,64,128,256,512,1024,2048],
-    )
-    
-    # Display 2D convergence results
-    print("\n2D Convergence Results:")
-    print("-" * 50)
-    print(f"Path counts tested: {convergence_2d_result['path_counts']}")
-    print(f"Step counts tested: {convergence_2d_result['step_counts']}")
-    print(f"\nMinimum absolute error achieved: {np.min(convergence_2d_result['error_grid']):.6f}")
-    print(f"Maximum absolute error: {np.max(convergence_2d_result['error_grid']):.6f}")
-    
-    # Find best combination
-    min_idx = np.unravel_index(np.argmin(convergence_2d_result['error_grid']), 
-                               convergence_2d_result['error_grid'].shape)
-    best_paths = convergence_2d_result['path_counts'][min_idx[0]]
-    best_steps = convergence_2d_result['step_counts'][min_idx[1]]
-    print(f"\nBest combination: {best_paths:,} paths × {best_steps:,} steps")
-    print(f"Achieved error: {convergence_2d_result['error_grid'][min_idx]:.6f}")
-    
-    # Plot 2D convergence
-    print("\nGenerating 2D convergence plots...")
-    visualizer.plot_convergence_2d(convergence_2d_result)
-    
-    # ============================================================
-    # SUMMARY
-    # ============================================================
-    print("\n" + "="*80)
-    print("EXECUTION COMPLETE")
-    print("="*80)
-    
-    print("\n✓ All tasks completed successfully:")
-    print("  1. PLTR option data fetched with mid prices")
-    print("  2. Parametric volatility surface calibrated")
-    print("  3. Local volatility model implemented with Monte Carlo")
-    
-    print(f"\n✓ Convergence Analysis:")
-    if convergence_result['achieved_error']:
-        print(f"  Target error {TARGET_ERROR} achieved with {convergence_result['required_paths']:,} paths")
-    else:
-        print(f"  Best achieved error: {min(convergence_result['path_convergence']['std_errors']):.2e}")
-    
-    print("\n✓ Files Generated:")
-    print("  - pltr_option_data.pkl (option data)")
-    print("  - Volatility surface plots")
-    print("  - Convergence analysis plots")
-    print("  - Model comparison plots")
-    
-    # Generate HTML report
-    print("\nGenerating HTML convergence report...")
-    visualizer.create_convergence_report(convergence_result, 'pltr_convergence_report.html')
-    print("✓ Report saved to pltr_convergence_report.html")
-    
-    print("\n" + "="*80)
-    print("Thank you for using the PLTR Exotic Option Pricing System!")
-    print("="*80)
-'''
 
 if __name__ == "__main__":
     try:
