@@ -1,9 +1,8 @@
 # =============================================================================
 # MC (Euler/Milstein + bridge) vs CN (PDE) — compact convergence comparison
-# - Uses the same ATM/IV selection as your other scripts
 # - Two figures:
-#     (1) MC path convergence  |  CN time-step convergence
-#     (2) MC step convergence  |  CN space-node convergence
+# MC path convergence + CN time-step convergence
+# MC step convergence + CN space-node convergence
 # =============================================================================
 import os, sys, warnings
 import numpy as np
@@ -13,7 +12,7 @@ warnings.filterwarnings("ignore")
 # Make local package importable (same folder)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# ---- MC side ---------------------------------------------------------------
+# ---- MC side 
 from euler_milstein_barrier_put import (
     prepare_pltr_market_inputs as prepare_market,  # market/IV selection
     sweep_vs_paths as mc_sweep_vs_paths,
@@ -22,14 +21,14 @@ from euler_milstein_barrier_put import (
     _add_badge as add_badge,
 )
 
-# ---- CN side (only sweep helpers; no direct CN solver import) --------------
+# ---- CN side
 from CN_Method_v1 import (
     cn_sweep_vs_time,
     cn_sweep_vs_space,
 )
 from option_pricing.data.yahoo_data import OptionDataPuller
 
-# ------------------------------ Settings -----------------------------------
+# ----Settings 
 PATHS_LIST            = [100, 1_000, 10_000, 100_000, 1_000_000]
 STEPS_LIST            = [50, 100, 250, 500, 1000]
 FIXED_STEPS_FOR_PATHS = 250
@@ -41,12 +40,13 @@ SEED_PATHS            = 4242
 SEED_STEPS            = 2025
 CHUNK_SIZE            = 200_000
 
-# -------------------------------- Main -------------------------------------
+# ----- Main 
 if __name__ == "__main__":
     # Pull market once (consistent with your other scripts)
     puller = OptionDataPuller("PLTR")
     market = prepare_market(puller, barrier_pct=0.85, prefer_side="auto")
     S0, K, B, r, sigma, T = (market[k] for k in ("S0","K","B","r","sigma","T"))
+    r = 0.035
     M_ref, N_ref = CN_REF_GRID
 
     # CN sweeps (time & space). cn_time_ref serves as our CN reference line.
@@ -72,8 +72,8 @@ if __name__ == "__main__":
         seed=SEED_STEPS, chunk_size=CHUNK_SIZE
     )
 
-    # ========================== Figure 1 ===================================
-    # Left: MC vs paths        Right: CN vs time steps
+    # ==== Figure 1 
+
     fig, axes = plt.subplots(1, 2, figsize=(12,5), sharey=False)
 
     # MC paths
@@ -109,8 +109,7 @@ if __name__ == "__main__":
 
     fig.tight_layout()
 
-    # ========================== Figure 2 ===================================
-    # Left: MC vs steps/year   Right: CN vs space nodes
+    # ==== Figure 2 
     fig, axes = plt.subplots(1, 2, figsize=(12,5), sharey=False)
 
     # MC steps/year
