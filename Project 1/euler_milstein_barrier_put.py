@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 warnings.filterwarnings("ignore")
 
-# Make local package importable (matches project layout)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from option_pricing.data.yahoo_data import OptionDataPuller
 
@@ -48,9 +47,9 @@ def _bridge_knock_prob(S0, S1, B, sigma, dt):
     return np.clip(np.exp(np.clip(expo, -700.0, 50.0)), 0.0, 1.0)
 
 
-# =============================================================================
-# [B] Market plumbing — pick 1Y-ish expiry, ATM strike & IV (CN-consistent)
-# =============================================================================
+# ======================================================
+# [B] Market plumbing — pick 1Y expiry, ATM strike & IV 
+# ======================================================
 def _pick_expiry_close_to_1y(puller: OptionDataPuller):
     exps = puller.get_option_expirations()
     if not exps: raise RuntimeError("No option expirations available.")
@@ -123,7 +122,7 @@ def prepare_pltr_market_inputs(puller: OptionDataPuller, *, barrier_pct=0.85,
     have_call = (not np.isnan(Kc)) and (ivc is not None)
     have_put  = (not np.isnan(Kp)) and (ivp is not None)
 
-    # Decide which IV to use (policy mirrors CN script)
+    # Decide which IV to use
     if prefer_side == "call" and have_call:
         K, sigma, side_used = Kc, ivc, "call"
     elif prefer_side == "put" and have_put:
@@ -149,7 +148,6 @@ def prepare_pltr_market_inputs(puller: OptionDataPuller, *, barrier_pct=0.85,
         else:
             raise RuntimeError("No valid ATM IV found on either side.")
 
-    # Guard against percent-looking IVs
     if sigma > 2.0: sigma *= 0.01
 
     return {
@@ -158,7 +156,7 @@ def prepare_pltr_market_inputs(puller: OptionDataPuller, *, barrier_pct=0.85,
         "B": float(barrier_pct * S0),
         "r": float(puller.risk_free_rate),
         "sigma": float(sigma),
-        "T": T_default,                            # use actual days-to-expiry (CN-consistent)
+        "T": T_default,                            # use actual days-to-expiry
         "expiry_str": expiry_str,
         "days_to_exp": days_to_exp,
         "side_used": side_used
@@ -349,7 +347,7 @@ if __name__ == "__main__":
     print(f"  Chosen chain expiry: {market['expiry_str']} (~{market['days_to_exp']} days)  "
           f"|  IV side used: {market['side_used']}  |  Pricing horizon: {market['T']:.2f}y\n")
 
-    # Settings (kept consistent across scripts)
+    # Settings
     PATHS_LIST            = [100, 1_000, 10_000, 100_000, 1_000_000]
     STEPS_LIST            = [50, 100, 250, 500, 1000]
     FIXED_STEPS_FOR_PATHS = 250

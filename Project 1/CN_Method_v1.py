@@ -1,6 +1,6 @@
 # =============================================================================
 # PLTR Down-and-Out Put — Crank–Nicolson (CN) PDE
-# - ATM/IV selection consistent with MC scripts (side nearest to spot; average if close)
+# - ATM/IV selection consistent with MC scripts
 # - Convergence vs time steps (N) and vs space nodes (M)
 # - Plot formatting & badges aligned with the MC style
 # =============================================================================
@@ -227,7 +227,7 @@ def prepare_pltr_market_inputs(puller: OptionDataPuller, *, barrier_pct=0.85,
 
 
 # =============================================================================
-# [D] Convergence sweeps (CN-only): vs time steps N, vs space nodes M
+# [D] Convergence sweeps: vs time steps N, vs space nodes M
 # =============================================================================
 def cn_sweep_vs_time(S0, K, B, r, sigma, T,
                      steps_list=(50, 100, 250, 500, 1000),
@@ -268,9 +268,9 @@ def cn_sweep_vs_space(S0, K, B, r, sigma, T,
     return df, ref, (M_ref, N_ref)
 
 
-# =============================================================================
-# [E] Plot utilities — badges + CN plots (styled like MC)
-# =============================================================================
+# ==============================================
+# [E] Plot utilities — badges + CN plots 
+# ==============================================
 def _market_badge_text(mkt):
     S0, K, B = mkt["S0"], mkt["K"], mkt["B"]
     r, sigma, T = mkt["r"], mkt["sigma"], mkt["T"]
@@ -314,10 +314,10 @@ def plot_cn_space_convergence(df_space, ref_price, ref_grid, mkt, *, N_fixed):
 
 
 # =============================================================================
-# [F] Main — mirrors MC execution flow (pull → prepare → sweeps → print → plot)
+# [F] Main
 # =============================================================================
 if __name__ == "__main__":
-    # 1) Pull market and normalize inputs exactly like MC scripts
+    # Pull market and normalize inputs exactly like MC scripts
     puller = OptionDataPuller("PLTR", risk_free_rate=0.05)
     market = prepare_pltr_market_inputs(puller, barrier_pct=0.85, prefer_side="auto")
 
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     print(f"S0={S0:.4f}  K(ATM)={K:.4f}  B=0.85*S0={B:.4f}")
     print(f"r={r:.4%}  sigma(ATM)={sigma:.4%}  side_used={market['side_used']}\n")
 
-    # 2) Reference price on a fine grid (handy for parity/logging)
+    # Reference price on a fine grid (handy for parity/logging)
     cn_ref, _ = price_do_put_cn(S0, K, B, r, sigma, T,
                                 M=1600, N=1600, rebate=0.0, use_rannacher=True, return_grid=False)
     vanilla = bs_put_price(S0, K, r, sigma, T)
@@ -337,14 +337,14 @@ if __name__ == "__main__":
     print(f"Vanilla BS put:           {vanilla:.6f}")
     print(f"DI (by parity):           {vanilla - cn_ref:.6f}\n")
 
-    # 3) Convergence settings (mirrors MC style)
+    # Convergence settings
     STEPS_LIST = [50, 100, 250, 500, 1000]
     M_FIXED    = 1200
     SPACE_LIST = [50, 100, 250, 500, 1000]
     N_FIXED    = 1200
     REF_GRID   = (1600, 1600)
 
-    # 4) Sweeps
+    # Sweeps
     df_steps, ref_steps_price, _ = cn_sweep_vs_time(S0, K, B, r, sigma, T,
                                                     steps_list=STEPS_LIST,
                                                     M_fixed=M_FIXED, ref_grid=REF_GRID,
@@ -361,7 +361,7 @@ if __name__ == "__main__":
     print("\nSpace convergence (CN; N fixed):")
     print(df_space.to_string(index=False))
 
-    # 6) Plots (styled like MC; badges with market + fixed dimension)
+    # 6) Plots
     plot_cn_time_convergence(df_steps, ref_steps_price, REF_GRID, market, M_fixed=M_FIXED)
     plot_cn_space_convergence(df_space, ref_space_price, REF_GRID, market, N_fixed=N_FIXED)
     plt.show()

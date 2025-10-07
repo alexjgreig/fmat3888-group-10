@@ -93,9 +93,9 @@ def mc_price_call_both_methods(S0, K, r, sigma, T, *, steps_per_year, n_paths,
     return _final(acc_eu), _final(acc_mi)
 
 
-# =============================================================================
-# [C] Market plumbing — pick 1Y-ish expiry, ATM strike & IV (CN-consistent)
-# =============================================================================
+# =======================================================
+# [C] Market plumbing — pick 1Y expiry, ATM strike & IV
+# =======================================================
 def _pick_expiry_close_to_1y(puller: OptionDataPuller):
     exps = puller.get_option_expirations()
     if not exps:
@@ -178,7 +178,7 @@ def prepare_pltr_market_inputs(prefer_side: str = "auto"):
             if abs(Kc - S0) <= abs(Kp - S0): K, sigma, side_used = Kc, ivc, "call"
             else:                             K, sigma, side_used = Kp, ivp, "put"
     else:
-        # auto (default): choose side whose strike is closest to S0; average if very close
+        # choose side whose strike is closest to S0; average if very close
         if have_call and have_put:
             if abs(Kc - Kp) <= 0.5:
                 K = 0.5 * (Kc + Kp)
@@ -194,7 +194,7 @@ def prepare_pltr_market_inputs(prefer_side: str = "auto"):
         else:
             raise RuntimeError("No valid ATM IV found on either side.")
 
-    if sigma > 2.0:    # guard against percent IV like 57 → 0.57
+    if sigma > 2.0:    # guard against percent IV
         sigma *= 0.01
 
     r = float(puller.risk_free_rate)
@@ -309,24 +309,24 @@ if __name__ == "__main__":
     print(f"  Chain expiry chosen: {market['expiry_str']} (~{market['days_to_exp']} days) "
           f"| IV side used: {market['side_used']}\n")
 
-    # --- Analytic reference
+    # Analytic reference
     bs_px = bs_call(S0, K, r, sigma, T)
     print(f"Black–Scholes reference: {bs_px:.6f}\n")
 
-    # --- Convergence settings (consistent across scripts)
+    # convergence settings 
     PATHS_LIST            = [100, 1_000, 10_000, 100_000, 1_000_000]
     STEPS_LIST            = [50, 100, 250, 500, 1000]
     FIXED_STEPS_FOR_PATHS = 250
     FIXED_PATHS_FOR_STEPS = 100_000
     CHUNK_SIZE            = 200_000
 
-    # --- Run sweeps
+    # Run sweeps
     res_paths = sweep_vs_paths(market, PATHS_LIST, steps_per_year=FIXED_STEPS_FOR_PATHS,
                                seed=4242, chunk_size=CHUNK_SIZE)
     res_steps = sweep_vs_steps(market, STEPS_LIST, n_paths=FIXED_PATHS_FOR_STEPS,
                                seed=2025, chunk_size=CHUNK_SIZE)
 
-    # --- Console tables
+    # Console tables
     print("PATHS convergence (steps/year = {}):".format(FIXED_STEPS_FOR_PATHS))
     print("paths     | Euler_price   SE       | Milstein_price   SE")
     for n, pe, see, pm, sem in zip(res_paths["paths"], res_paths["euler_price"], res_paths["euler_se"],
