@@ -231,7 +231,7 @@ def main():
     
     lv_euro_result = local_vol_model.price_european_option(
         K=K, T=T, option_type='call',
-        n_paths=10000, n_steps=100  # Reduced complexity
+        n_paths=100000, n_steps=252  # Reduced complexity
     )
     
     print(f"  Local Vol Price: ${lv_euro_result['price']:.4f}")
@@ -247,7 +247,7 @@ def main():
     lv_barrier_result = local_vol_model.price_barrier_option(
         K=K, H=H, T=T,
         barrier_type='down-out', option_type='put',
-        n_paths=10000, n_steps=1000  # Reduced complexity
+        n_paths=100000, n_steps=252  # Reduced complexity
     )
     
     print(f"  Local Vol Barrier Price: ${lv_barrier_result['price']:.4f}")
