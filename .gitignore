@@ -38,7 +38,7 @@ coverage.xml
 *.ind
 *.ilg
 
-# Report folder (keep .tex and .bib files, ignore generated files)
+# Report folders - ignore everything in these directories
 Project 1/report/
 Project 2/report/
 Project 1/charts_old/
