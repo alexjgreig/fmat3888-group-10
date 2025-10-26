@@ -36,6 +36,18 @@ class AssetDataLoader:
         ]
         self.growth_assets = self.asset_classes[:6]  # First 6 are growth
         self.defensive_assets = self.asset_classes[6:]  # Last 3 are defensive
+        # Bloomberg tickers that correspond to each asset class when using the Market Data sheet
+        self.asset_ticker_aliases = {
+            'Australian Listed Equity [G]': ['ASA52'],
+            "Int'l Listed Equity (Hedged) [G]": ['NDDLWI'],
+            "Int'l Listed Equity (Unhedged) [G]": ['NDLEEGF'],
+            'Australian Listed Property [G]': ['RDAU'],
+            "Int'l Listed Property [G]": ['FDCIISAH'],
+            "Int'l Listed Infrastructure [G]": ['HEDGNAV'],
+            'Australian Fixed Income [D]': ['BACM0'],
+            "Int'l Fixed Income (Hedged) [D]": ['LGTRTRAH', 'H03432AU'],
+            'Cash [D]': ['BAUBIL']
+        }
 
     def load_data(self) -> pd.DataFrame:
         """
@@ -44,37 +56,101 @@ class AssetDataLoader:
         Returns:
             DataFrame with monthly returns for each asset class
         """
-        # Read the Excel file
-        df = pd.read_excel(self.file_path, sheet_name='Historical Returns', header=None)
+        try:
+            excel_file = pd.ExcelFile(self.file_path)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"Data file not found: {self.file_path}") from exc
 
-        # Find the row with asset class headers (row 3 based on our exploration)
+        if 'Market Data' in excel_file.sheet_names:
+            raw_df = excel_file.parse('Market Data')
+            returns_df = self._process_market_data_sheet(raw_df)
+        elif 'Historical Returns' in excel_file.sheet_names:
+            raw_df = excel_file.parse('Historical Returns', header=None)
+            returns_df = self._process_historical_returns_sheet(raw_df)
+        else:
+            available_sheets = ', '.join(excel_file.sheet_names)
+            raise ValueError(
+                "Expected to find either a 'Market Data' or 'Historical Returns' sheet "
+                f"in {self.file_path}. Available sheets: {available_sheets}"
+            )
+
+        # Store the processed data
+        self.returns_data = returns_df
+
+        return returns_df
+
+    def _process_market_data_sheet(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transform the Market Data sheet into the standard returns DataFrame.
+        """
+        # Normalise column labels for easier matching
+        df = df.copy()
+        df.columns = [
+            col.strip() if isinstance(col, str) else col
+            for col in df.columns
+        ]
+
+        if df.empty:
+            raise ValueError("Market Data sheet is empty.")
+
+        # Extract and clean dates from the first column
+        date_series = df.iloc[:, 0]
+        dates = date_series.apply(self._convert_excel_date)
+        df.index = dates
+
+        # Build the returns DataFrame using ticker aliases
+        clean_data = {}
+        for asset in self.asset_classes:
+            ticker_aliases = self.asset_ticker_aliases.get(asset, [])
+            col_name = self._match_market_column(df.columns, ticker_aliases)
+            if col_name is None:
+                aliases = ', '.join(ticker_aliases) or 'N/A'
+                raise KeyError(
+                    f"Could not locate a column for asset '{asset}' "
+                    f"using ticker aliases: {aliases}"
+                )
+            clean_data[asset] = pd.to_numeric(df[col_name], errors='coerce')
+
+        returns_df = pd.DataFrame(clean_data, index=dates)
+
+        # Drop rows without a valid date
+        returns_df = returns_df[returns_df.index.notna()]
+
+        # Sort by date and clean duplicates
+        returns_df = returns_df.sort_index()
+        returns_df = returns_df[~returns_df.index.duplicated(keep='first')]
+
+        # Drop rows where all asset returns are NaN
+        returns_df = returns_df.dropna(how='all')
+
+        # Fill remaining gaps
+        returns_df = returns_df.ffill().bfill()
+
+        return returns_df
+
+    def _process_historical_returns_sheet(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Legacy support for the Historical Returns sheet structure.
+        """
         header_row = 3
         data_start_row = 4
 
-        # Extract dates from column 1 (index 1)
         dates_col = df.iloc[data_start_row:, 1]
 
-        # Clean dates - handle various date formats
         dates = []
         for date_val in dates_col:
             if pd.notna(date_val):
                 try:
-                    # Try to convert to datetime
                     if isinstance(date_val, (int, float)):
-                        # Excel date number
-                        date = pd.Timestamp('1899-12-30') + pd.Timedelta(days=int(date_val))
+                        date = pd.Timestamp('1899-12-30') + pd.Timedelta(days=float(date_val))
                     else:
                         date = pd.to_datetime(date_val)
                     dates.append(date)
-                except:
+                except Exception:
                     dates.append(None)
             else:
                 dates.append(None)
 
-        # Create a clean dataframe with proper structure
-        clean_data = {}
-
-        # Map column indices to asset classes
         col_mapping = {
             2: 'Australian Listed Equity [G]',
             3: "Int'l Listed Equity (Hedged) [G]",
@@ -87,32 +163,62 @@ class AssetDataLoader:
             10: 'Cash [D]'
         }
 
-        # Extract data for each asset class
+        clean_data = {}
         for col_idx, asset_name in col_mapping.items():
             values = df.iloc[data_start_row:, col_idx].values
-            # Convert to numeric, handling any non-numeric values
             numeric_values = pd.to_numeric(values, errors='coerce')
             clean_data[asset_name] = numeric_values[:len(dates)]
 
-        # Create final dataframe
         returns_df = pd.DataFrame(clean_data, index=dates)
 
-        # Remove rows with invalid dates
         returns_df = returns_df[returns_df.index.notna()]
-
-        # Sort by date
         returns_df = returns_df.sort_index()
-
-        # Remove any duplicate dates
         returns_df = returns_df[~returns_df.index.duplicated(keep='first')]
-
-        # Handle missing values - forward fill then backward fill
         returns_df = returns_df.ffill().bfill()
 
-        # Store the processed data
-        self.returns_data = returns_df
-
         return returns_df
+
+    @staticmethod
+    def _convert_excel_date(value):
+        """Convert Excel serial dates or strings into pandas timestamps."""
+        if pd.isna(value):
+            return pd.NaT
+        if isinstance(value, (int, float)):
+            try:
+                return pd.Timestamp('1899-12-30') + pd.to_timedelta(float(value), unit='D')
+            except Exception:
+                return pd.NaT
+        try:
+            return pd.to_datetime(value)
+        except Exception:
+            return pd.NaT
+
+    @staticmethod
+    def _match_market_column(columns: List, ticker_aliases: List[str]) -> str:
+        """
+        Locate the column name in the Market Data sheet that corresponds to any alias.
+        """
+        if not ticker_aliases:
+            return None
+
+        normalised_aliases = [
+            alias.strip().upper().replace(' ', '')
+            for alias in ticker_aliases
+        ]
+
+        for col in columns:
+            if not isinstance(col, str):
+                continue
+            normalised_col = col.strip().upper().replace(' ', '')
+            for alias in normalised_aliases:
+                if (
+                    normalised_col == alias
+                    or normalised_col == f"{alias}INDEX"
+                    or normalised_col.startswith(alias)
+                    or normalised_col.endswith(alias)
+                ):
+                    return col
+        return None
 
     def calculate_statistics(self) -> Dict:
         """

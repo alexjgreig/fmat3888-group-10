@@ -26,7 +26,7 @@ print("="*60)
 # Test 1: Data Loading
 print("\n1. Testing Data Loader...")
 try:
-    loader = AssetDataLoader('data/HistoricalData(2012-2024).xlsm')
+    loader = AssetDataLoader('data/BBG Data (2000-2025).xlsx')
     returns_data = loader.load_data()
     print(f"✓ Data loaded successfully: {returns_data.shape}")
     print(f"  Assets: {len(returns_data.columns)}")
