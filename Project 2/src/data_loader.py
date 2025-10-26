@@ -3,6 +3,7 @@ Data Loader Module for FMAT3888 Project 2
 Handles loading and preprocessing of historical asset returns data
 """
 
+import os
 import pandas as pd
 import numpy as np
 import warnings
@@ -383,7 +384,12 @@ def test_loader():
     """Test function to verify data loader works correctly"""
 
     # Initialize loader
-    loader = AssetDataLoader('Project 2/data/HistoricalData(2012-2024).xlsm')
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data',
+        'BBG Data (2000-2025).xlsx'
+    )
+    loader = AssetDataLoader(data_path)
 
     # Load data
     returns_df = loader.load_data()

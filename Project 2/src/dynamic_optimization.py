@@ -3,6 +3,7 @@ Dynamic Portfolio Optimization Module for Questions 2(h-k)
 Implements dynamic rebalancing, risk attribution, and multi-period optimization
 """
 
+import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -424,7 +425,12 @@ def run_dynamic_optimization():
     print("="*60)
 
     # Load data
-    loader = AssetDataLoader('../data/HistoricalData(2012-2024).xlsm')
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data',
+        'BBG Data (2000-2025).xlsx'
+    )
+    loader = AssetDataLoader(data_path)
     returns_data = loader.load_data()
 
     # Estimate parameters
