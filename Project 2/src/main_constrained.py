@@ -347,7 +347,13 @@ class ConstrainedPortfolioAnalysis:
 def main():
     """Main execution function"""
     # Set data path
-    data_path = '../data/HistoricalData(2012-2024).xlsm'
+    data_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..',
+        'data',
+        'BBG Data (2000-2025).xlsx'
+    )
+    data_path = os.path.abspath(data_path)
 
     # Check if file exists
     if not os.path.exists(data_path):

@@ -3,8 +3,12 @@ Benchmark-Constrained Portfolio Optimization
 Keeps the portfolio close to the MySuper benchmark while permitting qualitative tilts.
 """
 
+<<<<<<< HEAD
 from __future__ import annotations
 
+=======
+import os
+>>>>>>> ab13223e224ad082ffed9bbf5757bb99c78c5e69
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -327,9 +331,19 @@ def run_benchmark_constrained_optimization():
     print("BENCHMARK-CONSTRAINED PORTFOLIO OPTIMISATION")
     print("=" * 70)
 
+<<<<<<< HEAD
     base_dir = Path(__file__).resolve().parents[1]
     data_path = base_dir / "data" / "HistoricalData(2012-2024).xlsm"
     loader = AssetDataLoader(str(data_path))
+=======
+    # Load data
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data',
+        'BBG Data (2000-2025).xlsx'
+    )
+    loader = AssetDataLoader(data_path)
+>>>>>>> ab13223e224ad082ffed9bbf5757bb99c78c5e69
     returns_data = loader.load_data()
     estimator = ParameterEstimator(returns_data)
     exp_returns = estimator.estimate_expected_returns("combined")
