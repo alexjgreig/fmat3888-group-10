@@ -59,9 +59,7 @@ try:
     # Find minimum variance portfolio
     result = optimizer.optimize_portfolio(
         target_return=estimator.target_return,
-        growth_allocation=0.7,
-        min_weight=0.0,
-        max_weight=0.4
+        growth_allocation=optimizer.growth_target,
     )
 
     if result['success']:
@@ -94,9 +92,7 @@ print("\n4. Testing Efficient Frontier Generation...")
 try:
     frontier = optimizer.generate_efficient_frontier(
         n_points=20,
-        growth_allocation=0.7,
-        min_weight=0.0,
-        max_weight=0.4
+        growth_allocation=optimizer.growth_target,
     )
 
     print(f"✓ Efficient frontier generated")

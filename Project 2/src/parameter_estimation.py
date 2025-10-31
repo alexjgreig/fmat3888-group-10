@@ -33,6 +33,13 @@ class ParameterEstimator:
         self.cpi = 0.02594  # 2.594% from notes
         self.target_return = self.cpi + 0.03  # CPI + 3%
 
+    def _get_lookback_data(self, lookback_periods: Optional[int]) -> pd.DataFrame:
+        """Return returns data restricted to a lookback window if specified."""
+        if not lookback_periods:
+            return self.returns_data
+        lookback = min(lookback_periods, len(self.returns_data))
+        return self.returns_data.iloc[-lookback:]
+
     def estimate_expected_returns(self, method: str = 'combined',
                                  lookback_periods: Optional[int] = None) -> pd.Series:
         """
@@ -45,9 +52,7 @@ class ParameterEstimator:
         Returns:
             Series of annualized expected returns
         """
-        data = self.returns_data
-        if lookback_periods:
-            data = self.returns_data.iloc[-lookback_periods:]
+        data = self._get_lookback_data(lookback_periods)
 
         if method == 'historical':
             # Arithmetic mean (for use in mean-variance optimization)
@@ -155,9 +160,7 @@ class ParameterEstimator:
         Returns:
             Annualized covariance matrix
         """
-        data = self.returns_data
-        if lookback_periods:
-            data = self.returns_data.iloc[-lookback_periods:]
+        data = self._get_lookback_data(lookback_periods)
 
         if method == 'sample':
             # Simple sample covariance
@@ -345,6 +348,27 @@ class ParameterEstimator:
             'recommended': self.estimate_covariance_matrix('shrinkage')  # Our choice
         }
 
+        # Horizon-specific views (5-year, 10-year, full history)
+        horizon_definitions = {
+            '5Y': 60,
+            '10Y': 120,
+            'Full': None
+        }
+        horizon_views = {}
+        for label, months in horizon_definitions.items():
+            horizon_data = self._get_lookback_data(months)
+            horizon_returns = self.estimate_expected_returns('combined', months)
+            horizon_cov = self.estimate_covariance_matrix('shrinkage', months)
+            horizon_views[label] = {
+                'returns': horizon_returns,
+                'covariance': horizon_cov,
+                'risk_metrics': self.calculate_risk_metrics(horizon_returns, horizon_cov),
+                'lookback_months': len(horizon_data),
+                'sample_start': horizon_data.index[0],
+                'sample_end': self.returns_data.index[-1]
+            }
+        report['horizon_views'] = horizon_views
+
         # Risk metrics
         recommended_returns = report['expected_returns']['recommended']
         recommended_cov = report['covariance_matrices']['recommended']
@@ -406,14 +430,33 @@ def run_parameter_estimation():
         sharpe = (ret - estimator.risk_free_rate) / vol
         print(f"{asset[:40]:40} Return: {ret:7.2%}  Vol: {vol:7.2%}  Sharpe: {sharpe:6.3f}")
 
-    print("\n3. CORRELATION MATRIX")
+    print("\n3. HORIZON COMPARISON (Combined Returns & Shrinkage Covariance)")
+    print("-"*60)
+    horizon_rows = []
+    for label, info in report['horizon_views'].items():
+        horizon_rows.append({
+            'Horizon': label,
+            'Lookback Months': info['lookback_months'],
+            'Start': info['sample_start'].strftime('%Y-%m'),
+            'End': info['sample_end'].strftime('%Y-%m'),
+            'Avg Return (%)': info['returns'].mean() * 100,
+            'Avg Vol (%)': np.sqrt(np.diag(info['covariance'].values)).mean() * 100,
+            'Avg Corr': info['risk_metrics']['avg_correlation']
+        })
+    horizon_df = pd.DataFrame(horizon_rows)
+    horizon_df['Avg Return (%)'] = horizon_df['Avg Return (%)'].map(lambda x: f"{x:.2f}")
+    horizon_df['Avg Vol (%)'] = horizon_df['Avg Vol (%)'].map(lambda x: f"{x:.2f}")
+    horizon_df['Avg Corr'] = horizon_df['Avg Corr'].map(lambda x: f"{x:.3f}")
+    print(horizon_df.to_string(index=False))
+
+    print("\n4. CORRELATION MATRIX (Full Sample)")
     print("-"*60)
     corr_matrix = loader.get_correlation_matrix()
     print("\nAverage Correlation:", report['risk_metrics']['avg_correlation'])
     print("Max Correlation:", report['risk_metrics']['max_correlation'])
     print("Min Correlation:", report['risk_metrics']['min_correlation'])
 
-    print("\n4. TARGET RETURN FEASIBILITY")
+    print("\n5. TARGET RETURN FEASIBILITY")
     print("-"*60)
     target_info = report['target_return_analysis']
     print(f"CPI: {target_info['cpi']:.2%}")

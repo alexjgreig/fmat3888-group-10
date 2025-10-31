@@ -2,112 +2,76 @@
 
 ## Key Achievement: Benchmark-Aligned Optimization
 
-The optimized portfolio successfully balances return enhancement with tracking error constraints, ensuring mandate safety while improving risk-adjusted returns.
+The refreshed optimisation delivers the qualitative 73% growth posture from `notes.md` while keeping tracking error comfortably below the mandate ceiling. The resulting portfolio lifts risk-adjusted returns without diverging materially from the MySuper benchmark.
 
 ## Portfolio Comparison
 
 ### Benchmark Portfolio (Industry Standard MySuper)
-Based on typical MySuper allocations and notes.md guidance:
+Based on typical MySuper allocations and the qualitative target:
 - **Expected Return**: 8.64%
 - **Volatility**: 8.20%
 - **Sharpe Ratio**: 0.809
 - **Growth/Defensive**: 73% / 27%
 
-### Optimized Portfolio (2% Tracking Error Constraint)
-- **Expected Return**: 8.34% (-30 bps)
-- **Volatility**: 7.36% (-84 bps) ✅
-- **Sharpe Ratio**: 0.862 (+0.053) ✅
-- **Growth/Defensive**: 70% / 30%
-- **Tracking Error**: 1.31% (well within 2% limit)
+### Optimised Qualitative Portfolio (TE ≤ 2%)
+- **Expected Return**: 8.31% (-33 bps)
+- **Volatility**: 7.64% (-56 bps)
+- **Sharpe Ratio**: 0.825 (+0.016)
+- **Growth/Defensive**: 71% / 29%
+- **Tracking Error**: 0.85% (vs 2% limit)
 
 ## Asset Allocation
 
-| Asset Class | Benchmark | Optimized | Active Position | Rationale |
-|------------|-----------|-----------|-----------------|-----------|
-| **Growth Assets (70%)** |
-| Australian Equity | 25% | 20% | -5% | Reduce domestic concentration |
-| Int'l Equity (Hedged) | 13% | 10.42% | -2.58% | Lower hedging costs |
-| Int'l Equity (Unhedged) | 25% | 30% | +5% | Capture global growth |
-| Australian Property | 6% | 1% | -5% | High correlation with Aus equity |
-| Int'l Property | 2% | 1.58% | -0.42% | Maintain diversification |
-| Int'l Infrastructure | 2% | 7% | +5% | Inflation protection |
-| **Defensive Assets (30%)** |
-| Australian Fixed Income | 16% | 19% | +3% | Increase duration |
-| Int'l Fixed Income (Hedged) | 7% | 2% | -5% | Reduce complexity |
-| Cash | 4% | 9% | +5% | Liquidity buffer |
-
-## Key Portfolio Tilts
-
-### Overweights (Positive Active Positions)
-1. **Int'l Equity (Unhedged) +5%**: Capture global technology and AI growth themes
-2. **Int'l Infrastructure +5%**: Benefit from inflation-linked returns
-3. **Cash +5%**: Maintain liquidity for member redemptions
-4. **Australian Fixed Income +3%**: Duration exposure with franking benefits
-
-### Underweights (Negative Active Positions)
-1. **Australian Equity -5%**: Reduce concentration in commodities/housing
-2. **Australian Property -5%**: Already exposed via Australian equity
-3. **Int'l Fixed Income (Hedged) -5%**: Reduce hedging costs and complexity
+| Asset Class | Benchmark | Optimised | Active | Comment |
+|-------------|-----------|-----------|--------|---------|
+| **Growth (71%)** |||||
+| Australian Listed Equity | 25.0% | 22.0% | -3.0% | Trim domestic cyclicality |
+| Int'l Listed Equity (Hedged) | 13.0% | 10.0% | -3.0% | Moderately higher FX exposure |
+| Int'l Listed Equity (Unhedged) | 25.0% | 26.4% | +1.4% | Preserve offshore growth bias |
+| Australian Listed Property | 6.0% | 4.0% | -2.0% | Avoid doubling up on housing beta |
+| Int'l Listed Property | 2.0% | 0.0% | -2.0% | Redeploy to infrastructure |
+| Int'l Listed Infrastructure | 2.0% | 8.6% | +6.6% | Inflation-linked cash flows |
+| **Defensive (29%)** |||||
+| Australian Fixed Income | 16.0% | 19.0% | +3.0% | Anchor duration locally |
+| Int'l Fixed Income (Hedged) | 7.0% | 4.0% | -3.0% | Simplify hedged rates exposure |
+| Cash | 4.0% | 6.0% | +2.0% | Liquidity buffer for member flows |
 
 ## Risk Metrics
 
-### Risk Attribution (Top 5 Contributors)
-1. Int'l Listed Equity (Unhedged): 36.34%
-2. Australian Listed Equity: 31.49%
-3. Int'l Listed Equity (Hedged): 15.67%
-4. Int'l Listed Infrastructure: 7.88%
-5. Australian Fixed Income: 3.82%
+- **Tracking error**: 0.85% relative to the benchmark weights
+- **Portfolio VaR (95%, annualised)**: 6.11%
+- **Portfolio CVaR (95%, annualised)**: 9.48%
+- **Top risk contributors**: Int'l Listed Equity (Hedged) 31.3%, Australian Listed Equity 28.3%, Int'l Listed Infrastructure 11.5%, Australian Listed Property 11.5%
 
-### Downside Risk
-- **Value at Risk (95%)**: 3.83%
-- **Conditional VaR (95%)**: 6.93%
+## Dynamic Strategy Comparison (Quarterly Simulation)
+
+| Strategy | Expected Return | Volatility | Sharpe | 5th Pctl | 95th Pctl | Costs |
+|----------|----------------|------------|--------|----------|-----------|-------|
+| Static buy & hold | 7.29% | 5.23% | 1.01 | -1.31% | 15.70% | 0.00% |
+| Rebalance every quarter | 11.38% | 7.34% | 1.28 | -1.10% | 23.20% | 0.24% |
+| Rebalance every 12 months | **11.40%** | **7.31%** | **1.29** | -0.82% | 23.34% | 0.02% |
+
+Quarterly-to-annual rebalance frequencies dominate the static policy on a Sharpe basis even after incorporating turnover penalties, with annual rebalancing providing the best risk/return trade-off.
 
 ## Compliance with Requirements
 
-✅ **Target Return**: Portfolio return of 8.34% exceeds minimum requirement of 5.59% (CPI + 3%)
+- ✅ **Target return**: 8.31% exceeds CPI + 3% = 5.59%
+- ✅ **Growth share**: 71% sits inside the 60–76% APRA corridor and within ±2% of the qualitative 73% target
+- ✅ **Tracking error**: 0.85% << 2% mandate ceiling
+- ✅ **No position breaches**: All assets respect qualitative min/max bands derived from `notes.md`
 
-✅ **Growth/Defensive Split**: 70/30 allocation within the 60-76% allowable range
+## Strategic Rationale (from `notes.md`)
 
-✅ **Tracking Error**: 1.31% tracking error ensures mandate safety (well below 2% constraint)
+- Late-cycle macro view supports a mild global equity bias while tilting toward real assets (infrastructure) for inflation participation
+- Domestic duration retained for defensive ballast; international rates exposure pared back to simplify hedging
+- Cash lifted to 6% to service expected member withdrawals without forced selling
 
-✅ **Diversification**: Improved diversification ratio vs benchmark
+## Implementation Considerations
 
-✅ **Sharpe Ratio**: Enhanced from 0.809 to 0.862
+- **One-off turnover**: ~7 bps assuming 0.25% round-trip cost per asset
+- **Ongoing costs**: Additional 2 bps p.a. to maintain FX overlays and infrastructure mandates
+- **Monitoring**: Rebalance trigger of ±2% on the growth allocation keeps the portfolio inside mandate while allowing tactical drift
 
-## Strategic Rationale (Aligned with notes.md)
+## Summary
 
-### Macro View
-- Late-cycle, liquidity-rich expansion favors equities over duration
-- AI/datacenter capex drives global equity outperformance
-- Fiscal-driven curve steepening reduces domestic bond appeal
-
-### Implementation
-- **International tilt**: Increased allocation to unhedged international equity captures global growth
-- **Infrastructure overweight**: Provides inflation protection in rising rate environment
-- **Cash buffer**: Maintains operational liquidity for 1% p.a. fund outflows
-- **Reduced property**: Avoids doubling up on Australian housing exposure
-
-### Risk Management
-- **Tracking error constraint**: Ensures portfolio doesn't deviate excessively from peers
-- **Active weight limits**: Maximum 5% deviation from benchmark for any single asset
-- **Volatility reduction**: 84 bps lower volatility than benchmark improves risk-adjusted returns
-
-## Transaction Cost Analysis
-
-### One-off Implementation
-- Estimated reallocation cost: 7 basis points (0.07%)
-- Based on 0.25% cost per asset reallocation
-
-### Ongoing Costs
-- Management expense ratio increase: 1.7 bps
-- Tax drag increase: 13 bps (offset by growth asset tax efficiency)
-
-## Conclusion
-
-The optimized portfolio successfully achieves:
-1. **Risk reduction**: Lower volatility while maintaining competitive returns
-2. **Benchmark alignment**: Limited tracking error ensures mandate retention
-3. **Strategic positioning**: Aligned with late-cycle macro view
-4. **Cost efficiency**: Minimal implementation and ongoing costs
-
-This portfolio is suitable for a MySuper balanced fund seeking to enhance risk-adjusted returns while maintaining close alignment with industry benchmarks and APRA guidelines.
+The optimisation embeds the qualitative target, keeps the portfolio inside MySuper risk limits, and demonstrates that modest tilts (international infrastructure, slightly higher cash) can lift the Sharpe ratio without sacrificing mandate safety. Dynamic rebalancing analysis suggests an annual policy offers the best cost-adjusted uplift if the investment committee elects to move beyond static weights.

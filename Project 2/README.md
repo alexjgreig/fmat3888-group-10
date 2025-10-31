@@ -13,6 +13,7 @@ Project 2/
 │   ├── advanced_optimization.py  # Questions 2(f-g): Advanced techniques
 │   ├── dynamic_optimization.py   # Questions 2(h-k): Dynamic strategies
 │   ├── visualization.py          # Plotting and visualization
+│   ├── constraints_config.py     # Benchmark weights and qualitative bands
 │   └── main.py                   # Main orchestrator script
 ├── data/                         # Input data
 │   └── HistoricalData(2012-2024).xlsm
@@ -34,14 +35,14 @@ Project 2/
 ### Question 2: Static Portfolio Optimization
 
 #### 2(a): Efficient Frontier
-- Unconstrained frontier
-- Constrained frontier (max 40% per asset)
-- Balanced frontier (70% growth, 30% defensive)
+- Qualitative frontier using asset-specific bounds from `constraints_config.py`
+- Relaxed and wide frontiers for sensitivity testing
+- Growth corridor fixed at 73% with a ±2% tolerance
 
 #### 2(b): Minimum Variance Portfolio
-- Optimization with target return constraint (≥ 5.594%)
-- Growth/defensive allocation constraints (70/30 ± 6%)
-- Individual asset bounds (0-40%)
+- CPI + 3% return floor enforced
+- Growth/defensive split constrained to the qualitative range (71–75%)
+- Per-asset minimum/maximum weights imported from `constraints_config.py`
 
 #### 2(c-d): Methodology Documentation
 - Comprehensive parameter estimation choices
@@ -49,9 +50,9 @@ Project 2/
 - Risk metrics analysis
 
 #### 2(e): Portfolio Risk Profiles
-- Comparison of Defensive (30/70), Balanced (70/30), and Aggressive (90/10) portfolios
-- Sharpe ratio analysis
-- Exponential utility function evaluation (U(x) = -e^(-x))
+- Defensive (30/70), balanced (71/29), and aggressive (90/10) allocations
+- Sharpe and Sortino diagnostics with relaxed bounds for feasibility
+- Exponential utility comparison consistent with question requirements
 
 ### Advanced Topics
 
@@ -69,39 +70,42 @@ Project 2/
 - Impact analysis on portfolio optimization
 
 #### 2(h): Risk Management
-- Risk attribution analysis
-- Value at Risk (VaR) calculation
-- Conditional VaR (CVaR) calculation
-- Risk budgeting implementation
+- Risk attribution (marginal and component contributions)
+- Value at Risk (VaR) and Conditional VaR (CVaR)
+- Hooks for risk budgeting and drift monitoring
 
 #### 2(i-k): Dynamic Portfolio Optimization
-- Multi-period optimization
-- Quarterly rebalancing strategies
-- Transaction cost analysis
-- Static vs. dynamic strategy comparison
-- Monte Carlo simulation (1000 scenarios)
+- Multi-period utility maximisation with transaction costs
+- Rebalancing frequency sweep (quarterly, semi-annual, annual)
+- Static versus dynamic comparison with annualised reporting
+- Monte Carlo simulation (1,000 scenarios)
 
 ## Key Results
 
-### Optimal Portfolio (Balanced 70/30)
-- **Expected Return**: 7.52%
-- **Volatility**: 5.99%
-- **Sharpe Ratio**: 0.922
-- **Growth Allocation**: 64.0%
-- **Defensive Allocation**: 36.0%
+### Optimised Qualitative Portfolio (71/29)
+- **Expected Return**: 8.31%
+- **Volatility**: 7.64%
+- **Sharpe Ratio**: 0.825
+- **Growth Allocation**: 71%
+- **Defensive Allocation**: 29%
+- **Tracking Error vs Benchmark**: 0.85%
 
-### Top Holdings
-1. Int'l Listed Equity (Unhedged) [G]: 37.35%
-2. Cash [D]: 36.00%
-3. Int'l Listed Infrastructure [G]: 23.56%
-4. Australian Listed Equity [G]: 3.09%
+### Key Active Positions vs Benchmark
+1. Int'l Listed Infrastructure [G]: +6.6%
+2. Australian Fixed Income [D]: +3.0%
+3. Cash [D]: +2.0%
+4. Australian Listed Equity [G]: -3.0%
+5. Int'l Listed Equity (Hedged) [G]: -3.0%
 
-### Risk Metrics
-- **Value at Risk (95%)**: Based on Monte Carlo simulation
-- **Conditional VaR (95%)**: Expected shortfall calculation
+### Risk Metrics (Balanced Qualitative Portfolio)
+- **Value at Risk (95%)**: 6.11%
+- **Conditional VaR (95%)**: 9.48%
+- **Largest Risk Contributors**: Int'l Listed Equity (Hedged) 31%, Australian Listed Equity 28%, Int'l Listed Infrastructure 11%
 
-### Strategy Comparison
-The analysis compares static buy-and-hold with dynamic rebalancing strategies at different frequencies (quarterly, semi-annual, annual).
+### Dynamic Strategy Comparison (Annualised)
+- Static buy-and-hold: return 7.29%, volatility 5.23%, Sharpe 1.01
+- Rebalance every 12 months: return 11.40%, volatility 7.31%, Sharpe 1.29, turnover cost 0.02%
+- Rebalance quarterly: similar Sharpe uplift (1.28) with higher cost (0.24%)
 
 ## How to Run
 
@@ -169,19 +173,19 @@ python3 dynamic_optimization.py     # Questions 2(h-k)
 ### Risk Measures
 - **Volatility**: Annualized standard deviation
 - **Sharpe Ratio**: (Return - Risk-free) / Volatility
-- **VaR/CVaR**: 95% confidence level, 10,000 Monte Carlo simulations
+- **VaR/CVaR**: 95% confidence level, 1,000 Monte Carlo simulations (quarterly horizon)
 
 ## Key Insights
 
-1. **Diversification Benefits**: The optimal portfolio achieves higher Sharpe ratio than individual assets through diversification.
+1. **Qualitative alignment**: Asset-level bounds and the 73% growth corridor from `notes.md` are enforced directly through `constraints_config.py`.
 
-2. **International Exposure**: Significant allocation to international equities (unhedged) provides better risk-adjusted returns.
+2. **Infrastructure tilt**: Increasing listed infrastructure exposure provides meaningful inflation participation without breaching tracking error limits.
 
-3. **Growth/Defensive Balance**: The 70/30 split constraint is binding, with optimization pushing toward the growth limit.
+3. **Mandate safety**: The optimised portfolio delivers CPI+3% with only 0.85% tracking error, reducing risk of YFYS penalties.
 
-4. **Dynamic Rebalancing**: Quarterly rebalancing provides marginal improvement over static allocation after accounting for transaction costs.
+4. **Dynamic uplift**: Annual rebalancing materially lifts the Sharpe ratio (1.29 vs 1.01 static) for minimal turnover.
 
-5. **Non-PSD Handling**: Eigenvalue clipping provides the most stable correction method with minimal distortion.
+5. **Robust covariance handling**: Eigenvalue clipping restores PSD structure when correlations are stressed, keeping optimal weights stable.
 
 ## Authors
 Group 10 - FMAT3888 Projects in Financial Mathematics

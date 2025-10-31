@@ -165,6 +165,7 @@ class DynamicPortfolioOptimizer:
         self.risk_free_rate = risk_free_rate
         self.asset_names = expected_returns.index.tolist()
         self.n_assets = len(expected_returns)
+        self.periods_per_year = 4  # Quarterly modelling by default
 
     def simulate_multiperiod_returns(self, n_periods: int = 12,
                                     n_scenarios: int = 1000) -> np.ndarray:
@@ -265,8 +266,8 @@ class DynamicPortfolioOptimizer:
             weights = weights.reshape(1, -1)  # Single weight vector for simplification
             final_values = simulate_portfolio_value(weights)
 
-            # Calculate expected utility
-            utilities = -np.exp(-gamma * (final_values - 1))  # Excess return
+            annualised = self._final_values_to_annualised(final_values, n_periods)
+            utilities = -np.exp(-gamma * annualised)
             expected_utility = np.mean(utilities)
 
             return -expected_utility  # Negative for minimization
@@ -293,14 +294,21 @@ class DynamicPortfolioOptimizer:
         # Calculate performance metrics
         optimal_weights = result.x
         final_values = simulate_portfolio_value(optimal_weights.reshape(1, -1))
+        annualised = self._final_values_to_annualised(final_values, n_periods)
+        expected_return = np.mean(annualised)
+        volatility = np.std(annualised)
+        sharpe = (expected_return - self.risk_free_rate) / volatility if volatility > 0 else 0
 
         return {
             'optimal_weights': optimal_weights,
             'expected_final_value': np.mean(final_values),
             'std_final_value': np.std(final_values),
-            'sharpe_ratio': (np.mean(final_values) - 1) / np.std(final_values) if np.std(final_values) > 0 else 0,
-            'percentile_5': np.percentile(final_values, 5),
-            'percentile_95': np.percentile(final_values, 95)
+            'annualised_returns': annualised,
+            'expected_return': expected_return,
+            'volatility': volatility,
+            'sharpe_ratio': sharpe,
+            'percentile_5': np.percentile(annualised, 5),
+            'percentile_95': np.percentile(annualised, 95)
         }
 
     def compare_static_vs_dynamic(self, static_weights: np.ndarray,
@@ -328,15 +336,17 @@ class DynamicPortfolioOptimizer:
             rebalance_frequency=n_periods+1,  # Never rebalance
             transaction_cost=0
         )
+        static_annualised = self._final_values_to_annualised(static_values, n_periods)
 
         results.append({
             'Strategy': 'Static (Buy & Hold)',
             'Rebalance Frequency': 'Never',
-            'Expected Return': np.mean(static_values) - 1,
-            'Volatility': np.std(static_values),
-            'Sharpe Ratio': (np.mean(static_values) - 1) / np.std(static_values),
-            '5th Percentile': np.percentile(static_values, 5) - 1,
-            '95th Percentile': np.percentile(static_values, 95) - 1,
+            'Expected Return': np.mean(static_annualised),
+            'Volatility': np.std(static_annualised),
+            'Sharpe Ratio': (np.mean(static_annualised) - self.risk_free_rate) / np.std(static_annualised)
+            if np.std(static_annualised) > 0 else 0,
+            '5th Percentile': np.percentile(static_annualised, 5),
+            '95th Percentile': np.percentile(static_annualised, 95),
             'Transaction Costs': 0
         })
 
@@ -358,11 +368,11 @@ class DynamicPortfolioOptimizer:
             results.append({
                 'Strategy': f'Dynamic (Rebalance {freq_label})',
                 'Rebalance Frequency': freq_label,
-                'Expected Return': dynamic_result['expected_final_value'] - 1,
-                'Volatility': dynamic_result['std_final_value'],
+                'Expected Return': dynamic_result['expected_return'],
+                'Volatility': dynamic_result['volatility'],
                 'Sharpe Ratio': dynamic_result['sharpe_ratio'],
-                '5th Percentile': dynamic_result['percentile_5'] - 1,
-                '95th Percentile': dynamic_result['percentile_95'] - 1,
+                '5th Percentile': dynamic_result['percentile_5'],
+                '95th Percentile': dynamic_result['percentile_95'],
                 'Transaction Costs': total_tc
             })
 
@@ -412,9 +422,17 @@ class DynamicPortfolioOptimizer:
 
         return np.array(final_values)
 
+    def _final_values_to_annualised(self, final_values: np.ndarray, n_periods: int) -> np.ndarray:
+        """Convert terminal wealth values into annualised returns."""
+        years = n_periods / self.periods_per_year
+        years = max(years, 1e-9)
+        final_values = np.maximum(final_values, 1e-9)
+        return final_values ** (1 / years) - 1
+
 
 def run_dynamic_optimization():
     """Run dynamic optimization for Questions 2(h-k)"""
+    from pathlib import Path
     from data_loader import AssetDataLoader
     from parameter_estimation import ParameterEstimator
     from static_optimization import StaticPortfolioOptimizer
@@ -424,7 +442,9 @@ def run_dynamic_optimization():
     print("="*60)
 
     # Load data
-    loader = AssetDataLoader('../data/HistoricalData(2012-2024).xlsm')
+    base_dir = Path(__file__).resolve().parents[1]
+    data_path = base_dir / 'data' / 'HistoricalData(2012-2024).xlsm'
+    loader = AssetDataLoader(str(data_path))
     returns_data = loader.load_data()
 
     # Estimate parameters
@@ -436,7 +456,7 @@ def run_dynamic_optimization():
     static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
     static_result = static_optimizer.optimize_portfolio(
         target_return=0.05594,
-        growth_allocation=0.7
+        growth_allocation=0.73
     )
     static_weights = static_result['weights']
 

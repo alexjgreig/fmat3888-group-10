@@ -7,6 +7,7 @@ This script runs all analyses for Questions 1 and 2 (including advanced topics)
 
 import sys
 import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import warnings
@@ -38,9 +39,11 @@ class PortfolioAnalysisRunner:
         Args:
             data_path: Path to the Excel data file
         """
-        self.data_path = data_path
+        self.data_path = Path(data_path)
         self.results = {}
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.base_dir = Path(__file__).resolve().parents[1]
+        self.output_root = self.base_dir / 'outputs'
 
     def run_complete_analysis(self) -> Dict:
         """
@@ -58,7 +61,7 @@ class PortfolioAnalysisRunner:
         print("\n" + "="*70)
         print(" STEP 1: DATA LOADING AND PREPARATION")
         print("="*70)
-        loader = AssetDataLoader(self.data_path)
+        loader = AssetDataLoader(str(self.data_path))
         returns_data = loader.load_data()
         print(f"✓ Data loaded: {returns_data.shape[0]} months, {returns_data.shape[1]} assets")
         print(f"✓ Date range: {returns_data.index[0].strftime('%Y-%m')} to {returns_data.index[-1].strftime('%Y-%m')}")
@@ -96,23 +99,33 @@ class PortfolioAnalysisRunner:
         print("="*70)
         static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
 
-        # Generate efficient frontier
+        # Generate efficient frontier under different constraint tightness
         print("\n📈 Generating Efficient Frontier...")
-        frontier_unconstrained = static_optimizer.generate_efficient_frontier(
-            n_points=50, min_weight=0.0, max_weight=1.0
+        qualitative_bounds = [tuple(b) for b in static_optimizer.asset_bounds]
+        relaxed_bounds = [(0.0, 0.4) for _ in range(static_optimizer.n_assets)]
+        wide_bounds = [(0.0, 1.0) for _ in range(static_optimizer.n_assets)]
+
+        frontier_qualitative = static_optimizer.generate_efficient_frontier(
+            n_points=50,
+            growth_allocation=static_optimizer.growth_target,
+            bounds=qualitative_bounds,
         )
-        frontier_constrained = static_optimizer.generate_efficient_frontier(
-            n_points=50, min_weight=0.0, max_weight=0.4
+        frontier_relaxed = static_optimizer.generate_efficient_frontier(
+            n_points=50,
+            growth_allocation=static_optimizer.growth_target,
+            bounds=relaxed_bounds,
         )
-        frontier_balanced = static_optimizer.generate_efficient_frontier(
-            n_points=50, growth_allocation=0.7, min_weight=0.0, max_weight=0.4
+        frontier_wide = static_optimizer.generate_efficient_frontier(
+            n_points=50,
+            growth_allocation=static_optimizer.growth_target,
+            bounds=wide_bounds,
         )
 
         # Find minimum variance portfolio
         print("\n🎯 Finding Minimum Variance Portfolio...")
         min_var_result = static_optimizer.find_minimum_variance_portfolio(
             target_return=estimator.target_return,
-            growth_allocation=0.7
+            growth_allocation=static_optimizer.growth_target
         )
 
         # Compare risk profiles
@@ -121,9 +134,9 @@ class PortfolioAnalysisRunner:
 
         self.results['question_2_static'] = {
             'efficient_frontiers': {
-                'unconstrained': frontier_unconstrained,
-                'constrained': frontier_constrained,
-                'balanced': frontier_balanced
+                'qualitative': frontier_qualitative,
+                'relaxed': frontier_relaxed,
+                'wide': frontier_wide
             },
             'minimum_variance_portfolio': min_var_result,
             'risk_profile_comparison': risk_comparison
@@ -238,7 +251,7 @@ class PortfolioAnalysisRunner:
     def _create_visualizations(self):
         """Create all visualizations"""
         visualizer = PortfolioVisualizer()
-        output_dir = '../outputs/figures/'
+        output_dir = self.output_root / 'figures'
 
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
@@ -247,7 +260,7 @@ class PortfolioAnalysisRunner:
 
         # 1. Efficient Frontier
         if 'question_2_static' in self.results:
-            frontier = self.results['question_2_static']['efficient_frontiers']['balanced']
+            frontier = self.results['question_2_static']['efficient_frontiers']['qualitative']
             min_var = self.results['question_2_static']['minimum_variance_portfolio']['metrics']
 
             special_portfolios = [{
@@ -259,8 +272,8 @@ class PortfolioAnalysisRunner:
             visualizer.plot_efficient_frontier(
                 frontier,
                 special_portfolios=special_portfolios,
-                title='Efficient Frontier with 70/30 Growth/Defensive Constraint',
-                save_path=f"{output_dir}efficient_frontier_{self.timestamp}.png"
+                title='Efficient Frontier within Qualitative Bands (Growth 73%±2%)',
+                save_path=str(output_dir / f"efficient_frontier_{self.timestamp}.png")
             )
             print("✓ Efficient frontier plot created")
 
@@ -278,7 +291,7 @@ class PortfolioAnalysisRunner:
             visualizer.plot_correlation_heatmap(
                 corr_matrix,
                 title='Asset Correlation Matrix',
-                save_path=f"{output_dir}correlation_heatmap_{self.timestamp}.png"
+                save_path=str(output_dir / f"correlation_heatmap_{self.timestamp}.png")
             )
             print("✓ Correlation heatmap created")
 
@@ -293,7 +306,7 @@ class PortfolioAnalysisRunner:
             visualizer.plot_portfolio_weights(
                 weights_series,
                 title='Optimal Portfolio Weights (Min Variance with TR≥5.594%)',
-                save_path=f"{output_dir}portfolio_weights_{self.timestamp}.png"
+                save_path=str(output_dir / f"portfolio_weights_{self.timestamp}.png")
             )
             print("✓ Portfolio weights plot created")
 
@@ -304,7 +317,7 @@ class PortfolioAnalysisRunner:
             visualizer.plot_risk_attribution(
                 risk_attr,
                 title='Portfolio Risk Attribution Analysis',
-                save_path=f"{output_dir}risk_attribution_{self.timestamp}.png"
+                save_path=str(output_dir / f"risk_attribution_{self.timestamp}.png")
             )
             print("✓ Risk attribution plot created")
 
@@ -315,36 +328,36 @@ class PortfolioAnalysisRunner:
             visualizer.plot_performance_comparison(
                 strategy_comp,
                 title='Static vs Dynamic Strategy Performance',
-                save_path=f"{output_dir}strategy_comparison_{self.timestamp}.png"
+                save_path=str(output_dir / f"strategy_comparison_{self.timestamp}.png")
             )
             print("✓ Strategy comparison plot created")
 
     def _save_results(self):
         """Save all results to files"""
-        output_dir = '../outputs/tables/'
+        output_dir = self.output_root / 'tables'
         os.makedirs(output_dir, exist_ok=True)
 
         # Save key DataFrames to CSV
         if 'question_2_static' in self.results:
             # Save efficient frontier
-            frontier = self.results['question_2_static']['efficient_frontiers']['balanced']
-            frontier.to_csv(f"{output_dir}efficient_frontier_{self.timestamp}.csv", index=False)
+            frontier = self.results['question_2_static']['efficient_frontiers']['qualitative']
+            frontier.to_csv(output_dir / f"efficient_frontier_{self.timestamp}.csv", index=False)
             print(f"✓ Saved efficient frontier to CSV")
 
             # Save risk comparison
             risk_comp = self.results['question_2_static']['risk_profile_comparison']
-            risk_comp.to_csv(f"{output_dir}risk_profile_comparison_{self.timestamp}.csv", index=False)
+            risk_comp.to_csv(output_dir / f"risk_profile_comparison_{self.timestamp}.csv", index=False)
             print(f"✓ Saved risk profile comparison to CSV")
 
         if 'question_2_dynamic' in self.results:
             # Save risk attribution
             risk_attr = self.results['question_2_dynamic']['risk_attribution']
-            risk_attr.to_csv(f"{output_dir}risk_attribution_{self.timestamp}.csv", index=False)
+            risk_attr.to_csv(output_dir / f"risk_attribution_{self.timestamp}.csv", index=False)
             print(f"✓ Saved risk attribution to CSV")
 
             # Save strategy comparison
             strategy_comp = self.results['question_2_dynamic']['strategy_comparison']
-            strategy_comp.to_csv(f"{output_dir}strategy_comparison_{self.timestamp}.csv", index=False)
+            strategy_comp.to_csv(output_dir / f"strategy_comparison_{self.timestamp}.csv", index=False)
             print(f"✓ Saved strategy comparison to CSV")
 
         # Save optimal weights
@@ -357,23 +370,24 @@ class PortfolioAnalysisRunner:
                 'Weight_Pct': weights * 100
             })
             weights_df = weights_df[weights_df['Weight'] > 0.001].sort_values('Weight', ascending=False)
-            weights_df.to_csv(f"{output_dir}optimal_weights_{self.timestamp}.csv", index=False)
+            weights_df.to_csv(output_dir / f"optimal_weights_{self.timestamp}.csv", index=False)
             print(f"✓ Saved optimal weights to CSV")
 
 
 def main():
     """Main execution function"""
     # Set data path
-    data_path = '../data/HistoricalData(2012-2024).xlsm'
+    base_dir = Path(__file__).resolve().parents[1]
+    data_path = base_dir / 'data' / 'HistoricalData(2012-2024).xlsm'
 
     # Check if file exists
-    if not os.path.exists(data_path):
+    if not data_path.exists():
         print(f"Error: Data file not found at {data_path}")
         print("Please ensure the Excel file is in the correct location.")
         return
 
     # Run analysis
-    runner = PortfolioAnalysisRunner(data_path)
+    runner = PortfolioAnalysisRunner(str(data_path))
     results = runner.run_complete_analysis()
 
     # Print summary

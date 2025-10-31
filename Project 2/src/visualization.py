@@ -5,6 +5,8 @@ Creates charts and visualizations for the portfolio optimization results
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Optional, Tuple
@@ -95,7 +97,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def plot_correlation_heatmap(self, correlation_matrix: pd.DataFrame,
                                 title: str = "Asset Correlation Matrix",
@@ -126,7 +128,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def plot_portfolio_weights(self, weights: pd.Series,
                              title: str = "Portfolio Weights",
@@ -186,7 +188,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def plot_risk_attribution(self, attribution_df: pd.DataFrame,
                             title: str = "Risk Attribution Analysis",
@@ -270,7 +272,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def plot_performance_comparison(self, comparison_df: pd.DataFrame,
                                    title: str = "Strategy Performance Comparison",
@@ -345,7 +347,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def create_summary_dashboard(self, results: Dict,
                                 save_path: Optional[str] = None):
@@ -367,7 +369,7 @@ class PortfolioVisualizer:
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
 
 def create_all_visualizations(results: Dict, output_dir: str = '../outputs/figures/'):

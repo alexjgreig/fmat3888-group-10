@@ -5,11 +5,26 @@ Implements efficient frontier, minimum variance portfolio, and portfolio compari
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize, LinearConstraint, Bounds
-from typing import Dict, List, Tuple, Optional
+from scipy.optimize import minimize
+from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+
+try:
+    from .constraints_config import (
+        TARGET_CONSTRAINTS,
+        get_asset_bounds,
+        get_growth_target,
+        get_growth_tolerance,
+    )
+except ImportError:  # pragma: no cover - allow standalone execution
+    from constraints_config import (
+        TARGET_CONSTRAINTS,
+        get_asset_bounds,
+        get_growth_target,
+        get_growth_tolerance,
+    )
 
 warnings.filterwarnings('ignore')
 
@@ -17,8 +32,12 @@ warnings.filterwarnings('ignore')
 class StaticPortfolioOptimizer:
     """Static portfolio optimization using Markowitz framework"""
 
-    def __init__(self, expected_returns: pd.Series, cov_matrix: pd.DataFrame,
-                 risk_free_rate: float = 0.02):
+    def __init__(
+        self,
+        expected_returns: pd.Series,
+        cov_matrix: pd.DataFrame,
+        risk_free_rate: float = 0.02,
+    ):
         """
         Initialize portfolio optimizer
 
@@ -27,18 +46,24 @@ class StaticPortfolioOptimizer:
             cov_matrix: Annualized covariance matrix
             risk_free_rate: Annual risk-free rate
         """
-        self.expected_returns = expected_returns
-        self.cov_matrix = cov_matrix
+        self.expected_returns = expected_returns.sort_index()
+        self.cov_matrix = cov_matrix.loc[self.expected_returns.index, self.expected_returns.index]
         self.risk_free_rate = risk_free_rate
-        self.n_assets = len(expected_returns)
-        self.asset_names = expected_returns.index.tolist()
+        self.n_assets = len(self.expected_returns)
+        self.asset_names = self.expected_returns.index.tolist()
 
         # Identify growth and defensive assets
-        self.growth_indices = [i for i, name in enumerate(self.asset_names) if '[G]' in name]
-        self.defensive_indices = [i for i, name in enumerate(self.asset_names) if '[D]' in name]
+        self.growth_indices = [i for i, name in enumerate(self.asset_names) if "[G]" in name]
+        self.defensive_indices = [i for i, name in enumerate(self.asset_names) if "[D]" in name]
 
         # Target parameters from requirements
         self.target_return = 0.05594  # CPI + 3%
+        bounds_lookup = get_asset_bounds(tuple(self.asset_names))
+        self.asset_bounds = np.array([bounds_lookup[name] for name in self.asset_names])
+        self.lower_bounds = np.array([b[0] for b in self.asset_bounds])
+        self.upper_bounds = np.array([b[1] for b in self.asset_bounds])
+        self.growth_target = get_growth_target()
+        self.growth_tolerance = get_growth_tolerance()
 
     def calculate_portfolio_metrics(self, weights: np.ndarray) -> Dict:
         """
@@ -74,73 +99,82 @@ class StaticPortfolioOptimizer:
             'weights': weights
         }
 
-    def optimize_portfolio(self, target_return: Optional[float] = None,
-                          growth_allocation: Optional[float] = None,
-                          min_weight: float = 0.0,
-                          max_weight: float = 0.4,
-                          allow_short: bool = False) -> Dict:
+    def optimize_portfolio(
+        self,
+        target_return: Optional[float] = None,
+        growth_allocation: Optional[float] = None,
+        growth_tolerance: Optional[float] = None,
+        bounds: Optional[List[Tuple[float, float]]] = None,
+    ) -> Dict:
         """
         Optimize portfolio with various constraints
 
         Args:
             target_return: Minimum required return
-            growth_allocation: Target growth asset allocation (e.g., 0.7 for 70%)
-            min_weight: Minimum weight for any asset
-            max_weight: Maximum weight for any asset
-            allow_short: Whether to allow short selling
+            growth_allocation: Target growth asset allocation (defaults to qualitative target)
+            growth_tolerance: Allowed deviation around growth target
+            bounds: Optional per-asset weight bounds (min, max); defaults to qualitative bands
 
         Returns:
             Optimization results dictionary
         """
+        if growth_allocation is None:
+            growth_allocation = self.growth_target
+        if growth_tolerance is None:
+            growth_tolerance = self.growth_tolerance
+        if bounds is None:
+            bounds = [tuple(b) for b in self.asset_bounds]
+
         # Objective function (minimize variance)
-        def objective(weights):
-            return np.dot(weights, np.dot(self.cov_matrix.values, weights))
+        def objective(weights: np.ndarray) -> float:
+            return weights @ self.cov_matrix.values @ weights
 
         # Constraints
         constraints = []
 
         # Sum to 1 constraint
         constraints.append({
-            'type': 'eq',
-            'fun': lambda w: np.sum(w) - 1
+            "type": "eq",
+            "fun": lambda w: np.sum(w) - 1,
         })
 
         # Target return constraint
         if target_return is not None:
             constraints.append({
-                'type': 'ineq',
-                'fun': lambda w: np.dot(w, self.expected_returns.values) - target_return
+                "type": "ineq",
+                "fun": lambda w: w @ self.expected_returns.values - target_return,
             })
 
         # Growth/Defensive allocation constraint
-        if growth_allocation is not None:
-            tolerance = 0.06  # Allow ±6% deviation as per requirements
-            constraints.append({
-                'type': 'ineq',
-                'fun': lambda w: sum(w[i] for i in self.growth_indices) - (growth_allocation - tolerance)
-            })
-            constraints.append({
-                'type': 'ineq',
-                'fun': lambda w: (growth_allocation + tolerance) - sum(w[i] for i in self.growth_indices)
-            })
+        constraints.extend(
+            [
+                {
+                    "type": "ineq",
+                    "fun": lambda w: sum(w[i] for i in self.growth_indices)
+                    - (growth_allocation - growth_tolerance),
+                },
+                {
+                    "type": "ineq",
+                    "fun": lambda w: (growth_allocation + growth_tolerance)
+                    - sum(w[i] for i in self.growth_indices),
+                },
+            ]
+        )
 
-        # Bounds
-        if allow_short:
-            bounds = [(-1, max_weight) for _ in range(self.n_assets)]
-        else:
-            bounds = [(min_weight, max_weight) for _ in range(self.n_assets)]
-
-        # Initial guess (equal weights adjusted for constraints)
-        x0 = np.ones(self.n_assets) / self.n_assets
+        # Initial guess: midpoint of bounds
+        lower = np.array([b[0] for b in bounds])
+        upper = np.array([b[1] for b in bounds])
+        x0 = (lower + upper) / 2
+        x0 = x0 / x0.sum()
 
         # Optimize
         result = minimize(
             objective,
             x0,
-            method='SLSQP',
+            method="SLSQP",
             bounds=bounds,
             constraints=constraints,
-            options={'maxiter': 1000, 'ftol': 1e-9}
+            options={"maxiter": 1000, "ftol": 1e-9},
         )
 
         if not result.success:
@@ -149,6 +183,12 @@ class StaticPortfolioOptimizer:
         # Calculate metrics for optimal portfolio
         optimal_weights = result.x
         metrics = self.calculate_portfolio_metrics(optimal_weights)
+        metrics['constraint_checks'] = self._summarise_constraint_checks(
+            optimal_weights,
+            bounds=bounds,
+            growth_allocation=growth_allocation,
+            growth_tolerance=growth_tolerance,
+        )
 
         return {
             'success': result.success,
@@ -157,37 +197,33 @@ class StaticPortfolioOptimizer:
             'optimization_result': result
         }
 
-    def generate_efficient_frontier(self, n_points: int = 100,
-                                   growth_allocation: Optional[float] = None,
-                                   min_weight: float = 0.0,
-                                   max_weight: float = 0.4) -> pd.DataFrame:
+    def generate_efficient_frontier(
+        self,
+        n_points: int = 100,
+        growth_allocation: Optional[float] = None,
+        bounds: Optional[List[Tuple[float, float]]] = None,
+    ) -> pd.DataFrame:
         """
-        Generate efficient frontier points
-
-        Args:
-            n_points: Number of points on the frontier
-            growth_allocation: Fixed growth allocation if required
-            min_weight: Minimum weight for any asset
-            max_weight: Maximum weight for any asset
-
-        Returns:
-            DataFrame with efficient frontier points
+        Generate efficient frontier points under the qualitative asset bounds.
         """
-        # Find minimum and maximum possible returns
-        min_return = self.expected_returns.min() * min_weight
-        max_return = self.expected_returns.max() * max_weight * self.n_assets
+        if growth_allocation is None:
+            growth_allocation = self.growth_target
 
-        # Generate target returns
+        if bounds is None:
+            bounds = [tuple(b) for b in self.asset_bounds]
+
+        min_return, max_return = self._compute_extreme_returns(
+            growth_allocation=growth_allocation,
+            bounds=bounds,
+        )
         target_returns = np.linspace(min_return, max_return, n_points)
-
         frontier_points = []
 
         for target_return in target_returns:
             result = self.optimize_portfolio(
                 target_return=target_return,
                 growth_allocation=growth_allocation,
-                min_weight=min_weight,
-                max_weight=max_weight
+                bounds=bounds,
             )
 
             if result['success']:
@@ -216,8 +252,6 @@ class StaticPortfolioOptimizer:
         result = self.optimize_portfolio(
             target_return=target_return,
             growth_allocation=growth_allocation,
-            min_weight=0.0,
-            max_weight=0.4
         )
 
         if result['success']:
@@ -251,12 +285,36 @@ class StaticPortfolioOptimizer:
 
         for profile_name, allocation in profiles.items():
             # Optimize portfolio for this profile
+            if profile_name == 'Balanced':
+                profile_bounds = [tuple(b) for b in self.asset_bounds]
+            elif profile_name == 'Defensive':
+                profile_bounds = [
+                    (0.0, min(0.5, b[1] + 0.1)) if '[G]' in self.asset_names[idx]
+                    else (max(0.0, b[0]), min(0.6, b[1] + 0.1))
+                    for idx, b in enumerate(self.asset_bounds)
+                ]
+            else:  # Aggressive
+                profile_bounds = [
+                    (max(0.0, b[0]), min(0.5, b[1] + 0.1)) if '[G]' in self.asset_names[idx]
+                    else (0.0, min(0.3, b[1]))
+                    for idx, b in enumerate(self.asset_bounds)
+                ]
             result = self.optimize_portfolio(
                 target_return=self.target_return,
                 growth_allocation=allocation['growth'],
-                min_weight=0.0,
-                max_weight=0.4
+                bounds=profile_bounds,
             )
+
+            if not result['success']:
+                fallback_bounds = [
+                    (0.0, 0.6) if '[G]' in self.asset_names[idx] else (0.0, 1.0)
+                    for idx in range(self.n_assets)
+                ]
+                result = self.optimize_portfolio(
+                    target_return=self.target_return,
+                    growth_allocation=allocation['growth'],
+                    bounds=fallback_bounds,
+                )
 
             if result['success']:
                 metrics = result['metrics']
@@ -305,6 +363,89 @@ class StaticPortfolioOptimizer:
         downside_vol = portfolio_vol * np.sqrt(2/np.pi)  # Rough approximation
 
         return downside_vol
+
+    def _compute_extreme_returns(
+        self,
+        growth_allocation: float,
+        bounds: List[Tuple[float, float]],
+    ) -> Tuple[float, float]:
+        """
+        Solve for the minimum and maximum expected returns under constraints.
+        """
+        def optimise(direction: int) -> float:
+            def obj(weights: np.ndarray) -> float:
+                return -direction * (weights @ self.expected_returns.values)
+
+            initial = np.clip(
+                self.benchmark_initial_guess(bounds),
+                [b[0] for b in bounds],
+                [b[1] for b in bounds],
+            )
+
+            res = minimize(
+                obj,
+                initial,
+                method="SLSQP",
+                bounds=bounds,
+                constraints=[
+                    {"type": "eq", "fun": lambda w: np.sum(w) - 1},
+                    {
+                        "type": "ineq",
+                        "fun": lambda w: sum(w[i] for i in self.growth_indices)
+                        - (growth_allocation - self.growth_tolerance),
+                    },
+                    {
+                        "type": "ineq",
+                        "fun": lambda w: (growth_allocation + self.growth_tolerance)
+                        - sum(w[i] for i in self.growth_indices),
+                    },
+                ],
+                options={"maxiter": 1000, "ftol": 1e-9},
+            )
+            return res.x @ self.expected_returns.values
+
+        min_ret = optimise(direction=-1)
+        max_ret = optimise(direction=1)
+        if min_ret > max_ret:
+            min_ret, max_ret = max_ret, min_ret
+        return min_ret, max_ret
+
+    def benchmark_initial_guess(self, bounds: List[Tuple[float, float]]) -> np.ndarray:
+        """
+        Produce a feasible starting point anchored to target weights.
+        """
+        target = np.array([TARGET_CONSTRAINTS[name].target for name in self.asset_names])
+        lower = np.array([b[0] for b in bounds])
+        upper = np.array([b[1] for b in bounds])
+        guess = np.clip(target, lower, upper)
+        total = guess.sum()
+        if total == 0:
+            guess = np.full_like(guess, 1 / len(guess))
+        else:
+            guess = guess / total
+        return guess
+
+    def _summarise_constraint_checks(
+        self,
+        weights: np.ndarray,
+        bounds: List[Tuple[float, float]],
+        growth_allocation: float,
+        growth_tolerance: float,
+    ) -> Dict[str, float]:
+        """Diagnostics for constraint tightness."""
+        lower = np.array([b[0] for b in bounds])
+        upper = np.array([b[1] for b in bounds])
+        checks = {
+            "growth_gap": sum(weights[i] for i in self.growth_indices) - growth_allocation,
+            "growth_lower_buffer": sum(weights[i] for i in self.growth_indices)
+            - (growth_allocation - growth_tolerance),
+            "growth_upper_buffer": (growth_allocation + growth_tolerance)
+            - sum(weights[i] for i in self.growth_indices),
+        }
+        for idx, name in enumerate(self.asset_names):
+            checks[f"{name}::lower_buffer"] = weights[idx] - lower[idx]
+            checks[f"{name}::upper_buffer"] = upper[idx] - weights[idx]
+        return checks
 
     def plot_efficient_frontier(self, frontier_df: pd.DataFrame,
                                special_portfolios: Optional[List[Dict]] = None,
