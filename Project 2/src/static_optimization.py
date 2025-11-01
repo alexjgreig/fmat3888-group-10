@@ -130,7 +130,8 @@ class StaticPortfolioOptimizer:
                           min_weight: float = 0.0,
                           max_weight: float = 0.4,
                           allow_short: bool = False,
-                          enforce_exact_return: bool = False) -> Dict:
+                          enforce_exact_return: bool = False,
+                          enforce_asset_ranges: bool = True) -> Dict:
         """
         Optimize portfolio with various constraints
 
@@ -141,6 +142,7 @@ class StaticPortfolioOptimizer:
             max_weight: Maximum weight for any asset
             allow_short: Whether to allow short selling
             enforce_exact_return: If True, force portfolio return to equal target_return
+            enforce_asset_ranges: Whether to apply asset-level min/max bands
 
         Returns:
             Optimization results dictionary
@@ -157,7 +159,8 @@ class StaticPortfolioOptimizer:
         bounds = self._build_bounds(
             min_weight=min_weight,
             max_weight=max_weight,
-            allow_short=allow_short
+            allow_short=allow_short,
+            enforce_asset_ranges=enforce_asset_ranges
         )
 
         # Initial guess (equal weights adjusted for constraints)
@@ -227,8 +230,18 @@ class StaticPortfolioOptimizer:
     def _build_bounds(self,
                       min_weight: Optional[float],
                       max_weight: Optional[float],
-                      allow_short: bool) -> List[Tuple[float, float]]:
+                      allow_short: bool,
+                      enforce_asset_ranges: bool = True) -> List[Tuple[float, float]]:
         """Create bounds for portfolio weights."""
+        if not enforce_asset_ranges:
+            lower = min_weight if min_weight is not None else (-1.0 if allow_short else 0.0)
+            upper = max_weight if max_weight is not None else (1.0 if allow_short else 1.0)
+            if allow_short and min_weight is None:
+                lower = -1.0
+            if allow_short and max_weight is None:
+                upper = 1.0
+            return [(lower, upper) for _ in range(self.n_assets)]
+
         bounds: List[Tuple[float, float]] = []
 
         for asset in self.asset_names:
@@ -253,7 +266,8 @@ class StaticPortfolioOptimizer:
                                   growth_allocation: Optional[float],
                                   min_weight: float,
                                   max_weight: float,
-                                  allow_short: bool = False) -> Dict:
+                                  allow_short: bool = False,
+                                  enforce_asset_ranges: bool = True) -> Dict:
         """
         Optimize purely for expected return subject to feasibility constraints.
 
@@ -263,6 +277,7 @@ class StaticPortfolioOptimizer:
             min_weight: Lower bound for asset weights
             max_weight: Upper bound for asset weights
             allow_short: Whether short positions are allowed
+            enforce_asset_ranges: Whether to apply asset-level min/max bands
 
         Returns:
             Optimization result dictionary mirroring optimize_portfolio
@@ -276,7 +291,7 @@ class StaticPortfolioOptimizer:
             target_return=None,
             growth_allocation=growth_allocation
         )
-        bounds = self._build_bounds(min_weight, max_weight, allow_short)
+        bounds = self._build_bounds(min_weight, max_weight, allow_short, enforce_asset_ranges=enforce_asset_ranges)
         x0 = np.ones(self.n_assets) / self.n_assets
 
         result = minimize(
@@ -302,7 +317,8 @@ class StaticPortfolioOptimizer:
     def generate_efficient_frontier(self, n_points: int = 100000,
                                    growth_allocation: Optional[float] = None,
                                    min_weight: float = 0.0,
-                                   max_weight: float = 0.4) -> pd.DataFrame:
+                                   max_weight: float = 0.4,
+                                   enforce_asset_ranges: bool = True) -> pd.DataFrame:
         """
         Generate efficient frontier points
 
@@ -311,6 +327,7 @@ class StaticPortfolioOptimizer:
             growth_allocation: Fixed growth allocation if required
             min_weight: Minimum weight for any asset
             max_weight: Maximum weight for any asset
+            enforce_asset_ranges: Whether to apply asset-level min/max bands
 
         Returns:
             DataFrame with efficient frontier points
@@ -319,13 +336,15 @@ class StaticPortfolioOptimizer:
             target_return=None,
             growth_allocation=growth_allocation,
             min_weight=min_weight,
-            max_weight=max_weight
+            max_weight=max_weight,
+            enforce_asset_ranges=enforce_asset_ranges
         )
         max_return_result = self._optimize_expected_return(
             maximize=True,
             growth_allocation=growth_allocation,
             min_weight=min_weight,
-            max_weight=max_weight
+            max_weight=max_weight,
+            enforce_asset_ranges=enforce_asset_ranges
         )
 
         if not (min_variance_result['success'] and max_return_result['success']):
@@ -376,7 +395,8 @@ class StaticPortfolioOptimizer:
                     growth_allocation=growth_allocation,
                     min_weight=min_weight,
                     max_weight=max_weight,
-                    enforce_exact_return=True
+                    enforce_exact_return=True,
+                    enforce_asset_ranges=enforce_asset_ranges
                 )
 
                 if result['success']:
@@ -654,7 +674,8 @@ class StaticPortfolioOptimizer:
         frontier_unconstrained = self.generate_efficient_frontier(
             n_points=500,
             min_weight=0.0,
-            max_weight=1.0
+            max_weight=1.0,
+            enforce_asset_ranges=False
         )
 
         frontier_constrained = self.generate_efficient_frontier(
