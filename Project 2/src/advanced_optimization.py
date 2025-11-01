@@ -425,7 +425,11 @@ def run_advanced_optimization():
     utility_optimizer = UtilityOptimizer(expected_returns, cov_matrix)
 
     # Get mean-variance optimal portfolio for comparison
-    static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+    static_optimizer = StaticPortfolioOptimizer(
+        expected_returns,
+        cov_matrix,
+        returns_data=returns_data
+    )
     mv_result = static_optimizer.optimize_portfolio(target_return=0.05594, growth_allocation=0.7)
 
     # Compare utility-optimal with mean-variance
@@ -482,7 +486,11 @@ def run_advanced_optimization():
         corrected_cov = comparison[best_method]['matrix']
 
         # Optimize with corrected matrix
-        corrected_optimizer = StaticPortfolioOptimizer(expected_returns, corrected_cov)
+        corrected_optimizer = StaticPortfolioOptimizer(
+            expected_returns,
+            corrected_cov,
+            returns_data=returns_data
+        )
         corrected_result = corrected_optimizer.optimize_portfolio(
             target_return=0.05594,
             growth_allocation=0.7

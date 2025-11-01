@@ -7,6 +7,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, LinearConstraint, Bounds
+from scipy.stats import norm
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -19,7 +20,7 @@ class StaticPortfolioOptimizer:
     """Static portfolio optimization using Markowitz framework"""
 
     def __init__(self, expected_returns: pd.Series, cov_matrix: pd.DataFrame,
-                 risk_free_rate: float = 0.02):
+                 risk_free_rate: float = 0.02, returns_data: Optional[pd.DataFrame] = None):
         """
         Initialize portfolio optimizer
 
@@ -27,12 +28,14 @@ class StaticPortfolioOptimizer:
             expected_returns: Expected annual returns for each asset
             cov_matrix: Annualized covariance matrix
             risk_free_rate: Annual risk-free rate
+            returns_data: Optional historical returns (monthly) for additional analytics
         """
         self.expected_returns = expected_returns
         self.cov_matrix = cov_matrix
         self.risk_free_rate = risk_free_rate
         self.n_assets = len(expected_returns)
         self.asset_names = expected_returns.index.tolist()
+        self.returns_data = returns_data
 
         # Identify growth and defensive assets
         self.growth_indices = [i for i, name in enumerate(self.asset_names) if '[G]' in name]
@@ -393,6 +396,8 @@ class StaticPortfolioOptimizer:
                 # Calculate downside risk metrics
                 downside_vol = self._calculate_downside_volatility(result['weights'])
 
+                prob_negative_year, max_drawdown = self._calculate_additional_risks(result['weights'], metrics)
+
                 results.append({
                     'Profile': profile_name,
                     'Growth %': allocation['growth'] * 100,
@@ -402,7 +407,9 @@ class StaticPortfolioOptimizer:
                     'Sharpe Ratio': metrics['sharpe_ratio'],
                     'Exponential Utility': expected_utility,
                     'Downside Volatility': downside_vol,
-                    'Sortino Ratio': (metrics['return'] - self.risk_free_rate) / downside_vol if downside_vol > 0 else 0
+                    'Sortino Ratio': (metrics['return'] - self.risk_free_rate) / downside_vol if downside_vol > 0 else 0,
+                    'P(Negative Year)': prob_negative_year,
+                    'Max Drawdown': max_drawdown
                 })
 
         return pd.DataFrame(results)
@@ -430,6 +437,59 @@ class StaticPortfolioOptimizer:
         downside_vol = portfolio_vol * np.sqrt(2/np.pi)  # Rough approximation
 
         return downside_vol
+
+    def _calculate_additional_risks(self, weights: np.ndarray, metrics: Dict) -> Tuple[float, float]:
+        """
+        Calculate probability of negative annual return and maximum drawdown.
+
+        Args:
+            weights: Portfolio weights
+            metrics: Dict of portfolio metrics (requires expected return & volatility)
+
+        Returns:
+            Tuple (prob_negative_year, max_drawdown)
+        """
+        monthly_series = self._portfolio_return_series(weights)
+
+        if monthly_series is not None and not monthly_series.empty:
+            annual_returns = monthly_series.groupby(monthly_series.index.to_period('Y')).apply(
+                lambda x: np.prod(1 + x) - 1
+            )
+            prob_negative = float((annual_returns < 0).mean()) if not annual_returns.empty else np.nan
+
+            wealth = (1 + monthly_series).cumprod()
+            running_max = wealth.cummax()
+            drawdowns = wealth / running_max - 1
+            max_drawdown = float(abs(drawdowns.min())) if not drawdowns.empty else np.nan
+        else:
+            mu = metrics.get('return', 0.0)
+            sigma = metrics.get('volatility', 0.0)
+            if sigma > 0:
+                prob_negative = float(norm.cdf(-mu / sigma))
+                # Approximate drawdown as 2 standard deviations drop under log-normal assumption
+                approx_drop = np.exp(mu - 2 * sigma)
+                max_drawdown = float(max(0.0, 1 - approx_drop))
+            else:
+                prob_negative = 1.0 if mu < 0 else 0.0
+                max_drawdown = 0.0
+
+        return prob_negative, max_drawdown
+
+    def _portfolio_return_series(self, weights: np.ndarray) -> Optional[pd.Series]:
+        """
+        Build historical monthly portfolio returns if data is available.
+
+        Args:
+            weights: Portfolio weights
+
+        Returns:
+            Series of monthly returns or None if data unavailable
+        """
+        if self.returns_data is None:
+            return None
+
+        portfolio_returns = self.returns_data.dot(weights)
+        return portfolio_returns.dropna()
 
     def plot_efficient_frontier(self, frontier_df: pd.DataFrame,
                                special_portfolios: Optional[List[Dict]] = None,
@@ -604,7 +664,7 @@ def run_static_optimization():
     cov_matrix = estimator.estimate_covariance_matrix('shrinkage')
 
     # Initialize optimizer
-    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix, returns_data=returns_data)
 
     # Generate full report
     report = optimizer.generate_optimization_report()

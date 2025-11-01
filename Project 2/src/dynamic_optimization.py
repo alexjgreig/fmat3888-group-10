@@ -439,7 +439,11 @@ def run_dynamic_optimization():
     cov_matrix = estimator.estimate_covariance_matrix('shrinkage')
 
     # Get static optimal weights for comparison
-    static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+    static_optimizer = StaticPortfolioOptimizer(
+        expected_returns,
+        cov_matrix,
+        returns_data=returns_data
+    )
     static_result = static_optimizer.optimize_portfolio(
         target_return=0.05594,
         growth_allocation=0.7
