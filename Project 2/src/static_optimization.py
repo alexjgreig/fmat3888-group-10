@@ -36,6 +36,8 @@ class StaticPortfolioOptimizer:
         self.n_assets = len(expected_returns)
         self.asset_names = expected_returns.index.tolist()
         self.returns_data = returns_data
+        self.asset_weight_ranges = self._get_asset_weight_ranges()
+        self.asset_fees = self._get_asset_fees()
 
         # Identify growth and defensive assets
         self.growth_indices = [i for i, name in enumerate(self.asset_names) if '[G]' in name]
@@ -43,6 +45,41 @@ class StaticPortfolioOptimizer:
 
         # Target parameters from requirements
         self.target_return = 0.05594  # CPI + 3%
+
+    @staticmethod
+    def _get_asset_weight_ranges() -> Dict[str, Tuple[float, float]]:
+        """
+        Asset-level minimum and maximum weights aligned with MySuper guidance.
+        Australian Listed Equity minimum updated to 15% per latest specification.
+        """
+        return {
+            'Australian Listed Equity [G]': (0.15, 0.45),
+            "Int'l Listed Equity (Hedged) [G]": (0.0, 0.35),
+            "Int'l Listed Equity (Unhedged) [G]": (0.0, 0.35),
+            'Australian Listed Property [G]': (0.0, 0.25),
+            "Int'l Listed Property [G]": (0.0, 0.25),
+            "Int'l Listed Infrastructure [G]": (0.0, 0.30),
+            'Australian Fixed Income [D]': (0.05, 0.40),
+            "Int'l Fixed Income (Hedged) [D]": (0.0, 0.35),
+            'Cash [D]': (0.0, 0.15)
+        }
+
+    @staticmethod
+    def _get_asset_fees() -> Dict[str, float]:
+        """
+        Annual fee assumptions (in decimal form) for each asset class.
+        """
+        return {
+            'Australian Listed Equity [G]': 0.0005,
+            "Int'l Listed Equity (Hedged) [G]": 0.0011,
+            "Int'l Listed Equity (Unhedged) [G]": 0.0009,
+            'Australian Listed Property [G]': 0.0012,
+            "Int'l Listed Property [G]": 0.0022,
+            "Int'l Listed Infrastructure [G]": 0.0026,
+            'Australian Fixed Income [D]': 0.0010,
+            "Int'l Fixed Income (Hedged) [D]": 0.0010,
+            'Cash [D]': 0.0004
+        }
 
     def calculate_portfolio_metrics(self, weights: np.ndarray) -> Dict:
         """
@@ -61,6 +98,13 @@ class StaticPortfolioOptimizer:
         portfolio_variance = np.dot(weights, np.dot(self.cov_matrix.values, weights))
         portfolio_std = np.sqrt(portfolio_variance)
 
+        # Fee drag and net return
+        weighted_fee = sum(
+            weights[i] * self.asset_fees.get(self.asset_names[i], 0.0)
+            for i in range(self.n_assets)
+        )
+        net_return = portfolio_return - weighted_fee
+
         # Sharpe ratio
         sharpe_ratio = (portfolio_return - self.risk_free_rate) / portfolio_std if portfolio_std > 0 else 0
 
@@ -70,11 +114,13 @@ class StaticPortfolioOptimizer:
 
         return {
             'return': portfolio_return,
+            'net_return': net_return,
             'volatility': portfolio_std,
             'variance': portfolio_variance,
             'sharpe_ratio': sharpe_ratio,
             'growth_weight': growth_weight,
             'defensive_weight': defensive_weight,
+            'weighted_fee': weighted_fee,
             'weights': weights
         }
 
@@ -179,13 +225,28 @@ class StaticPortfolioOptimizer:
         return constraints
 
     def _build_bounds(self,
-                      min_weight: float,
-                      max_weight: float,
+                      min_weight: Optional[float],
+                      max_weight: Optional[float],
                       allow_short: bool) -> List[Tuple[float, float]]:
         """Create bounds for portfolio weights."""
-        if allow_short:
-            return [(-1, max_weight) for _ in range(self.n_assets)]
-        return [(min_weight, max_weight) for _ in range(self.n_assets)]
+        bounds: List[Tuple[float, float]] = []
+
+        for asset in self.asset_names:
+            range_lower, range_upper = self.asset_weight_ranges.get(asset, (min_weight, max_weight))
+
+            lower = range_lower if min_weight is None else max(range_lower, min_weight)
+            upper = range_upper if max_weight is None else min(range_upper, max_weight)
+
+            if allow_short:
+                lower = min(lower, -1.0 if min_weight is None else min(min_weight, -1.0))
+                upper = range_upper if max_weight is None else max(range_upper, max_weight)
+
+            if lower > upper:
+                lower, upper = range_lower, range_upper
+
+            bounds.append((lower, upper))
+
+        return bounds
 
     def _optimize_expected_return(self,
                                   maximize: bool,
@@ -279,9 +340,11 @@ class StaticPortfolioOptimizer:
             metrics = min_variance_result['metrics']
             return pd.DataFrame([{
                 'return': metrics['return'],
+                'net_return': metrics['net_return'],
                 'volatility': metrics['volatility'],
                 'sharpe_ratio': metrics['sharpe_ratio'],
-                'growth_weight': metrics['growth_weight']
+                'growth_weight': metrics['growth_weight'],
+                'weighted_fee': metrics['weighted_fee']
             }])
 
         eps = max(1e-6, return_span * 1e-3)
@@ -293,9 +356,11 @@ class StaticPortfolioOptimizer:
             metrics = result_dict['metrics']
             frontier_points.append({
                 'return': metrics['return'],
+                'net_return': metrics['net_return'],
                 'volatility': metrics['volatility'],
                 'sharpe_ratio': metrics['sharpe_ratio'],
-                'growth_weight': metrics['growth_weight']
+                'growth_weight': metrics['growth_weight'],
+                'weighted_fee': metrics['weighted_fee']
             })
 
         _append_metrics(min_variance_result)
@@ -351,6 +416,8 @@ class StaticPortfolioOptimizer:
         if result['success']:
             print(f"\nMinimum Variance Portfolio (Return ≥ {target_return:.2%}):")
             print(f"Expected Return: {result['metrics']['return']:.2%}")
+            print(f"Net Expected Return (after fees): {result['metrics']['net_return']:.2%}")
+            print(f"Fee Drag: {result['metrics']['weighted_fee']:.2%}")
             print(f"Volatility: {result['metrics']['volatility']:.2%}")
             print(f"Sharpe Ratio: {result['metrics']['sharpe_ratio']:.3f}")
             print(f"Growth Allocation: {result['metrics']['growth_weight']:.1%}")
@@ -403,6 +470,8 @@ class StaticPortfolioOptimizer:
                     'Growth %': allocation['growth'] * 100,
                     'Defensive %': allocation['defensive'] * 100,
                     'Expected Return': metrics['return'],
+                    'Net Expected Return': metrics['net_return'],
+                    'Weighted Fee': metrics['weighted_fee'],
                     'Volatility': metrics['volatility'],
                     'Sharpe Ratio': metrics['sharpe_ratio'],
                     'Exponential Utility': expected_utility,
