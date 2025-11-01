@@ -395,7 +395,6 @@ class CovarianceMatrixCorrector:
 
 def run_advanced_optimization():
     """Run advanced optimization for Questions 2(f-g)"""
-    from pathlib import Path
     from data_loader import AssetDataLoader
     from parameter_estimation import ParameterEstimator
     from static_optimization import StaticPortfolioOptimizer
@@ -405,18 +404,12 @@ def run_advanced_optimization():
     print("="*60)
 
     # Load data
-<<<<<<< HEAD
-    base_dir = Path(__file__).resolve().parents[1]
-    data_path = base_dir / 'data' / 'HistoricalData(2012-2024).xlsm'
-    loader = AssetDataLoader(str(data_path))
-=======
     data_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'data',
         'BBG Data (2000-2025).xlsx'
     )
     loader = AssetDataLoader(data_path)
->>>>>>> ab13223e224ad082ffed9bbf5757bb99c78c5e69
     returns_data = loader.load_data()
 
     # Estimate parameters
@@ -432,8 +425,12 @@ def run_advanced_optimization():
     utility_optimizer = UtilityOptimizer(expected_returns, cov_matrix)
 
     # Get mean-variance optimal portfolio for comparison
-    static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
-    mv_result = static_optimizer.optimize_portfolio(target_return=0.05594, growth_allocation=0.73)
+    static_optimizer = StaticPortfolioOptimizer(
+        expected_returns,
+        cov_matrix,
+        returns_data=returns_data
+    )
+    mv_result = static_optimizer.optimize_portfolio(target_return=0.05594, growth_allocation=0.7)
 
     # Compare utility-optimal with mean-variance
     comparison = utility_optimizer.compare_with_mean_variance(mv_result['weights'], gamma=1)
@@ -489,10 +486,14 @@ def run_advanced_optimization():
         corrected_cov = comparison[best_method]['matrix']
 
         # Optimize with corrected matrix
-        corrected_optimizer = StaticPortfolioOptimizer(expected_returns, corrected_cov)
+        corrected_optimizer = StaticPortfolioOptimizer(
+            expected_returns,
+            corrected_cov,
+            returns_data=returns_data
+        )
         corrected_result = corrected_optimizer.optimize_portfolio(
             target_return=0.05594,
-            growth_allocation=0.73
+            growth_allocation=0.7
         )
 
         print(f"\nUsing {best_method} correction:")

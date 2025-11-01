@@ -97,7 +97,11 @@ class PortfolioAnalysisRunner:
         print("\n" + "="*70)
         print(" QUESTION 2(a-e): STATIC PORTFOLIO OPTIMIZATION")
         print("="*70)
-        static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+        static_optimizer = StaticPortfolioOptimizer(
+            expected_returns,
+            cov_matrix,
+            returns_data=returns_data
+        )
 
         # Generate efficient frontier under different constraint tightness
         print("\n📈 Generating Efficient Frontier...")

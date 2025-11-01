@@ -6,26 +6,12 @@ Implements efficient frontier, minimum variance portfolio, and portfolio compari
 import os
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
-from typing import Dict, List, Optional, Tuple
+from scipy.optimize import minimize, LinearConstraint, Bounds
+from scipy.stats import norm
+from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
-
-try:
-    from .constraints_config import (
-        TARGET_CONSTRAINTS,
-        get_asset_bounds,
-        get_growth_target,
-        get_growth_tolerance,
-    )
-except ImportError:  # pragma: no cover - allow standalone execution
-    from constraints_config import (
-        TARGET_CONSTRAINTS,
-        get_asset_bounds,
-        get_growth_target,
-        get_growth_tolerance,
-    )
 
 warnings.filterwarnings('ignore')
 
@@ -33,12 +19,8 @@ warnings.filterwarnings('ignore')
 class StaticPortfolioOptimizer:
     """Static portfolio optimization using Markowitz framework"""
 
-    def __init__(
-        self,
-        expected_returns: pd.Series,
-        cov_matrix: pd.DataFrame,
-        risk_free_rate: float = 0.02,
-    ):
+    def __init__(self, expected_returns: pd.Series, cov_matrix: pd.DataFrame,
+                 risk_free_rate: float = 0.02, returns_data: Optional[pd.DataFrame] = None):
         """
         Initialize portfolio optimizer
 
@@ -46,25 +28,21 @@ class StaticPortfolioOptimizer:
             expected_returns: Expected annual returns for each asset
             cov_matrix: Annualized covariance matrix
             risk_free_rate: Annual risk-free rate
+            returns_data: Optional historical returns (monthly) for additional analytics
         """
-        self.expected_returns = expected_returns.sort_index()
-        self.cov_matrix = cov_matrix.loc[self.expected_returns.index, self.expected_returns.index]
+        self.expected_returns = expected_returns
+        self.cov_matrix = cov_matrix
         self.risk_free_rate = risk_free_rate
-        self.n_assets = len(self.expected_returns)
-        self.asset_names = self.expected_returns.index.tolist()
+        self.n_assets = len(expected_returns)
+        self.asset_names = expected_returns.index.tolist()
+        self.returns_data = returns_data
 
         # Identify growth and defensive assets
-        self.growth_indices = [i for i, name in enumerate(self.asset_names) if "[G]" in name]
-        self.defensive_indices = [i for i, name in enumerate(self.asset_names) if "[D]" in name]
+        self.growth_indices = [i for i, name in enumerate(self.asset_names) if '[G]' in name]
+        self.defensive_indices = [i for i, name in enumerate(self.asset_names) if '[D]' in name]
 
         # Target parameters from requirements
         self.target_return = 0.05594  # CPI + 3%
-        bounds_lookup = get_asset_bounds(tuple(self.asset_names))
-        self.asset_bounds = np.array([bounds_lookup[name] for name in self.asset_names])
-        self.lower_bounds = np.array([b[0] for b in self.asset_bounds])
-        self.upper_bounds = np.array([b[1] for b in self.asset_bounds])
-        self.growth_target = get_growth_target()
-        self.growth_tolerance = get_growth_tolerance()
 
     def calculate_portfolio_metrics(self, weights: np.ndarray) -> Dict:
         """
@@ -121,16 +99,9 @@ class StaticPortfolioOptimizer:
         Returns:
             Optimization results dictionary
         """
-        if growth_allocation is None:
-            growth_allocation = self.growth_target
-        if growth_tolerance is None:
-            growth_tolerance = self.growth_tolerance
-        if bounds is None:
-            bounds = [tuple(b) for b in self.asset_bounds]
-
         # Objective function (minimize variance)
-        def objective(weights: np.ndarray) -> float:
-            return weights @ self.cov_matrix.values @ weights
+        def objective(weights):
+            return np.dot(weights, np.dot(self.cov_matrix.values, weights))
 
         constraints = self._build_constraints(
             target_return=target_return,
@@ -150,10 +121,10 @@ class StaticPortfolioOptimizer:
         result = minimize(
             objective,
             x0,
-            method="SLSQP",
+            method='SLSQP',
             bounds=bounds,
             constraints=constraints,
-            options={"maxiter": 1000, "ftol": 1e-9},
+            options={'maxiter': 1000, 'ftol': 1e-9}
         )
 
         if not result.success:
@@ -162,12 +133,6 @@ class StaticPortfolioOptimizer:
         # Calculate metrics for optimal portfolio
         optimal_weights = result.x
         metrics = self.calculate_portfolio_metrics(optimal_weights)
-        metrics['constraint_checks'] = self._summarise_constraint_checks(
-            optimal_weights,
-            bounds=bounds,
-            growth_allocation=growth_allocation,
-            growth_tolerance=growth_tolerance,
-        )
 
         return {
             'success': result.success,
@@ -278,7 +243,16 @@ class StaticPortfolioOptimizer:
                                    min_weight: float = 0.0,
                                    max_weight: float = 0.4) -> pd.DataFrame:
         """
-        Generate efficient frontier points under the qualitative asset bounds.
+        Generate efficient frontier points
+
+        Args:
+            n_points: Number of points on the frontier
+            growth_allocation: Fixed growth allocation if required
+            min_weight: Minimum weight for any asset
+            max_weight: Maximum weight for any asset
+
+        Returns:
+            DataFrame with efficient frontier points
         """
         min_variance_result = self.optimize_portfolio(
             target_return=None,
@@ -370,6 +344,8 @@ class StaticPortfolioOptimizer:
         result = self.optimize_portfolio(
             target_return=target_return,
             growth_allocation=growth_allocation,
+            min_weight=0.0,
+            max_weight=0.4
         )
 
         if result['success']:
@@ -403,36 +379,12 @@ class StaticPortfolioOptimizer:
 
         for profile_name, allocation in profiles.items():
             # Optimize portfolio for this profile
-            if profile_name == 'Balanced':
-                profile_bounds = [tuple(b) for b in self.asset_bounds]
-            elif profile_name == 'Defensive':
-                profile_bounds = [
-                    (0.0, min(0.5, b[1] + 0.1)) if '[G]' in self.asset_names[idx]
-                    else (max(0.0, b[0]), min(0.6, b[1] + 0.1))
-                    for idx, b in enumerate(self.asset_bounds)
-                ]
-            else:  # Aggressive
-                profile_bounds = [
-                    (max(0.0, b[0]), min(0.5, b[1] + 0.1)) if '[G]' in self.asset_names[idx]
-                    else (0.0, min(0.3, b[1]))
-                    for idx, b in enumerate(self.asset_bounds)
-                ]
             result = self.optimize_portfolio(
                 target_return=self.target_return,
                 growth_allocation=allocation['growth'],
-                bounds=profile_bounds,
+                min_weight=0.0,
+                max_weight=0.4
             )
-
-            if not result['success']:
-                fallback_bounds = [
-                    (0.0, 0.6) if '[G]' in self.asset_names[idx] else (0.0, 1.0)
-                    for idx in range(self.n_assets)
-                ]
-                result = self.optimize_portfolio(
-                    target_return=self.target_return,
-                    growth_allocation=allocation['growth'],
-                    bounds=fallback_bounds,
-                )
 
             if result['success']:
                 metrics = result['metrics']
@@ -444,6 +396,8 @@ class StaticPortfolioOptimizer:
                 # Calculate downside risk metrics
                 downside_vol = self._calculate_downside_volatility(result['weights'])
 
+                prob_negative_year, max_drawdown = self._calculate_additional_risks(result['weights'], metrics)
+
                 results.append({
                     'Profile': profile_name,
                     'Growth %': allocation['growth'] * 100,
@@ -453,7 +407,9 @@ class StaticPortfolioOptimizer:
                     'Sharpe Ratio': metrics['sharpe_ratio'],
                     'Exponential Utility': expected_utility,
                     'Downside Volatility': downside_vol,
-                    'Sortino Ratio': (metrics['return'] - self.risk_free_rate) / downside_vol if downside_vol > 0 else 0
+                    'Sortino Ratio': (metrics['return'] - self.risk_free_rate) / downside_vol if downside_vol > 0 else 0,
+                    'P(Negative Year)': prob_negative_year,
+                    'Max Drawdown': max_drawdown
                 })
 
         return pd.DataFrame(results)
@@ -482,88 +438,58 @@ class StaticPortfolioOptimizer:
 
         return downside_vol
 
-    def _compute_extreme_returns(
-        self,
-        growth_allocation: float,
-        bounds: List[Tuple[float, float]],
-    ) -> Tuple[float, float]:
+    def _calculate_additional_risks(self, weights: np.ndarray, metrics: Dict) -> Tuple[float, float]:
         """
-        Solve for the minimum and maximum expected returns under constraints.
-        """
-        def optimise(direction: int) -> float:
-            def obj(weights: np.ndarray) -> float:
-                return -direction * (weights @ self.expected_returns.values)
+        Calculate probability of negative annual return and maximum drawdown.
 
-            initial = np.clip(
-                self.benchmark_initial_guess(bounds),
-                [b[0] for b in bounds],
-                [b[1] for b in bounds],
+        Args:
+            weights: Portfolio weights
+            metrics: Dict of portfolio metrics (requires expected return & volatility)
+
+        Returns:
+            Tuple (prob_negative_year, max_drawdown)
+        """
+        monthly_series = self._portfolio_return_series(weights)
+
+        if monthly_series is not None and not monthly_series.empty:
+            annual_returns = monthly_series.groupby(monthly_series.index.to_period('Y')).apply(
+                lambda x: np.prod(1 + x) - 1
             )
+            prob_negative = float((annual_returns < 0).mean()) if not annual_returns.empty else np.nan
 
-            res = minimize(
-                obj,
-                initial,
-                method="SLSQP",
-                bounds=bounds,
-                constraints=[
-                    {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-                    {
-                        "type": "ineq",
-                        "fun": lambda w: sum(w[i] for i in self.growth_indices)
-                        - (growth_allocation - self.growth_tolerance),
-                    },
-                    {
-                        "type": "ineq",
-                        "fun": lambda w: (growth_allocation + self.growth_tolerance)
-                        - sum(w[i] for i in self.growth_indices),
-                    },
-                ],
-                options={"maxiter": 1000, "ftol": 1e-9},
-            )
-            return res.x @ self.expected_returns.values
-
-        min_ret = optimise(direction=-1)
-        max_ret = optimise(direction=1)
-        if min_ret > max_ret:
-            min_ret, max_ret = max_ret, min_ret
-        return min_ret, max_ret
-
-    def benchmark_initial_guess(self, bounds: List[Tuple[float, float]]) -> np.ndarray:
-        """
-        Produce a feasible starting point anchored to target weights.
-        """
-        target = np.array([TARGET_CONSTRAINTS[name].target for name in self.asset_names])
-        lower = np.array([b[0] for b in bounds])
-        upper = np.array([b[1] for b in bounds])
-        guess = np.clip(target, lower, upper)
-        total = guess.sum()
-        if total == 0:
-            guess = np.full_like(guess, 1 / len(guess))
+            wealth = (1 + monthly_series).cumprod()
+            running_max = wealth.cummax()
+            drawdowns = wealth / running_max - 1
+            max_drawdown = float(abs(drawdowns.min())) if not drawdowns.empty else np.nan
         else:
-            guess = guess / total
-        return guess
+            mu = metrics.get('return', 0.0)
+            sigma = metrics.get('volatility', 0.0)
+            if sigma > 0:
+                prob_negative = float(norm.cdf(-mu / sigma))
+                # Approximate drawdown as 2 standard deviations drop under log-normal assumption
+                approx_drop = np.exp(mu - 2 * sigma)
+                max_drawdown = float(max(0.0, 1 - approx_drop))
+            else:
+                prob_negative = 1.0 if mu < 0 else 0.0
+                max_drawdown = 0.0
 
-    def _summarise_constraint_checks(
-        self,
-        weights: np.ndarray,
-        bounds: List[Tuple[float, float]],
-        growth_allocation: float,
-        growth_tolerance: float,
-    ) -> Dict[str, float]:
-        """Diagnostics for constraint tightness."""
-        lower = np.array([b[0] for b in bounds])
-        upper = np.array([b[1] for b in bounds])
-        checks = {
-            "growth_gap": sum(weights[i] for i in self.growth_indices) - growth_allocation,
-            "growth_lower_buffer": sum(weights[i] for i in self.growth_indices)
-            - (growth_allocation - growth_tolerance),
-            "growth_upper_buffer": (growth_allocation + growth_tolerance)
-            - sum(weights[i] for i in self.growth_indices),
-        }
-        for idx, name in enumerate(self.asset_names):
-            checks[f"{name}::lower_buffer"] = weights[idx] - lower[idx]
-            checks[f"{name}::upper_buffer"] = upper[idx] - weights[idx]
-        return checks
+        return prob_negative, max_drawdown
+
+    def _portfolio_return_series(self, weights: np.ndarray) -> Optional[pd.Series]:
+        """
+        Build historical monthly portfolio returns if data is available.
+
+        Args:
+            weights: Portfolio weights
+
+        Returns:
+            Series of monthly returns or None if data unavailable
+        """
+        if self.returns_data is None:
+            return None
+
+        portfolio_returns = self.returns_data.dot(weights)
+        return portfolio_returns.dropna()
 
     def plot_efficient_frontier(self, frontier_df: pd.DataFrame,
                                special_portfolios: Optional[List[Dict]] = None,
@@ -738,7 +664,7 @@ def run_static_optimization():
     cov_matrix = estimator.estimate_covariance_matrix('shrinkage')
 
     # Initialize optimizer
-    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix, returns_data=returns_data)
 
     # Generate full report
     report = optimizer.generate_optimization_report()

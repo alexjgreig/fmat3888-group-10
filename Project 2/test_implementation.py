@@ -54,7 +54,7 @@ except Exception as e:
 # Test 3: Static Optimization
 print("\n3. Testing Static Portfolio Optimization...")
 try:
-    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
+    optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix, returns_data=returns_data)
 
     # Find minimum variance portfolio
     result = optimizer.optimize_portfolio(
