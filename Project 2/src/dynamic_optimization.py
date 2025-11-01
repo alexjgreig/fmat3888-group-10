@@ -443,18 +443,12 @@ def run_dynamic_optimization():
     print("="*60)
 
     # Load data
-<<<<<<< HEAD
-    base_dir = Path(__file__).resolve().parents[1]
-    data_path = base_dir / 'data' / 'HistoricalData(2012-2024).xlsm'
-    loader = AssetDataLoader(str(data_path))
-=======
     data_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'data',
         'BBG Data (2000-2025).xlsx'
     )
     loader = AssetDataLoader(data_path)
->>>>>>> ab13223e224ad082ffed9bbf5757bb99c78c5e69
     returns_data = loader.load_data()
 
     # Estimate parameters

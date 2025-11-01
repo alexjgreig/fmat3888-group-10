@@ -381,10 +381,6 @@ class PortfolioAnalysisRunner:
 def main():
     """Main execution function"""
     # Set data path
-<<<<<<< HEAD
-    base_dir = Path(__file__).resolve().parents[1]
-    data_path = base_dir / 'data' / 'HistoricalData(2012-2024).xlsm'
-=======
     data_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         '..',
@@ -392,7 +388,6 @@ def main():
         'BBG Data (2000-2025).xlsx'
     )
     data_path = os.path.abspath(data_path)
->>>>>>> ab13223e224ad082ffed9bbf5757bb99c78c5e69
 
     # Check if file exists
     if not data_path.exists():
