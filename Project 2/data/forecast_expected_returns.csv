@@ -1,0 +1,10 @@
+Asset,ForecastReturn
+Australian Listed Equity [G],0.076
+"Int'l Listed Equity (Hedged) [G]",0.076
+"Int'l Listed Equity (Unhedged) [G]",0.071
+Australian Listed Property [G],0.058
+"Int'l Listed Property [G]",0.056
+"Int'l Listed Infrastructure [G]",0.067
+Australian Fixed Income [D],0.031
+"Int'l Fixed Income (Hedged) [D]",0.037
+Cash [D],0.027

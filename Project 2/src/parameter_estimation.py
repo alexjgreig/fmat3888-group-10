@@ -17,18 +17,25 @@ warnings.filterwarnings('ignore')
 class ParameterEstimator:
     """Advanced parameter estimation for portfolio optimization"""
 
-    def __init__(self, returns_data: pd.DataFrame, risk_free_rate: float = 0.02):
+    def __init__(self,
+                 returns_data: pd.DataFrame,
+                 risk_free_rate: float = 0.02,
+                 forecast_csv_path: Optional[str] = None):
         """
         Initialize parameter estimator
 
         Args:
             returns_data: DataFrame of monthly returns
             risk_free_rate: Annual risk-free rate (default 2%)
+            forecast_csv_path: Optional path to CSV of forward-looking return assumptions
         """
         self.returns_data = returns_data
         self.risk_free_rate = risk_free_rate
         self.n_assets = len(returns_data.columns)
         self.asset_names = returns_data.columns.tolist()
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.forecast_csv_path = self._resolve_forecast_path(forecast_csv_path)
+        self.forecast_returns = self._load_forecast_returns()
 
         # CPI and target returns from requirements
         self.cpi = 0.02594  # 2.594% from notes
@@ -40,6 +47,61 @@ class ParameterEstimator:
             return self.returns_data
         lookback = min(lookback_periods, len(self.returns_data))
         return self.returns_data.iloc[-lookback:]
+
+    def _resolve_forecast_path(self, forecast_csv_path: Optional[str]) -> Optional[str]:
+        """Return absolute path to the forecast CSV if available."""
+        if forecast_csv_path is None:
+            return os.path.join(self.base_dir, 'data', 'forecast_expected_returns.csv')
+        if os.path.isabs(forecast_csv_path):
+            return forecast_csv_path
+        return os.path.join(self.base_dir, forecast_csv_path)
+
+    def _load_forecast_returns(self) -> Optional[pd.Series]:
+        """Load forward-looking expected returns from CSV, if provided."""
+        path = self.forecast_csv_path
+        if not path or not os.path.exists(path):
+            return None
+
+        try:
+            df = pd.read_csv(path)
+        except Exception as exc:
+            warnings.warn(f"Unable to read forecast returns from {path}: {exc}")
+            return None
+
+        expected_columns = {'Asset', 'ForecastReturn'}
+        if not expected_columns.issubset(df.columns):
+            warnings.warn(
+                f"Forecast CSV {path} missing required columns {expected_columns}. "
+                "Ignoring forward-looking assumptions."
+            )
+            return None
+
+        forecast = pd.to_numeric(df['ForecastReturn'], errors='coerce')
+        asset_labels = df['Asset'].astype(str)
+
+        series = pd.Series(forecast.values, index=asset_labels)
+
+        # Detect percentage inputs and convert to decimals
+        if (series > 1).any():
+            series = series / 100.0
+
+        if series.isna().all():
+            warnings.warn(f"Forecast CSV {path} contains no usable numeric values.")
+            return None
+
+        return series
+
+    def _get_forecast_returns(self) -> Optional[pd.Series]:
+        """Return forecast series aligned to the available assets."""
+        if self.forecast_returns is None:
+            return None
+
+        aligned = self.forecast_returns.reindex(self.asset_names)
+
+        if aligned.isna().all():
+            return None
+
+        return aligned
 
     def estimate_expected_returns(self, method: str = 'combined',
                                  lookback_periods: Optional[int] = None) -> pd.Series:
@@ -70,14 +132,23 @@ class ParameterEstimator:
             annual_returns = self._shrinkage_returns(data)
 
         elif method == 'combined':
-            # Weighted combination of methods
+            # Blend historical estimates with forward-looking capital market assumptions
             hist = self.estimate_expected_returns('historical', lookback_periods)
             ewma = self.estimate_expected_returns('ewma', lookback_periods)
-            shrink = self.estimate_expected_returns('shrinkage', lookback_periods)
+            forecast = self._get_forecast_returns()
 
-            # Weights based on historical performance
-            weights = [0.3, 0.4, 0.3]  # hist, ewma, shrink
-            annual_returns = weights[0] * hist + weights[1] * ewma + weights[2] * shrink
+            if forecast is not None:
+                forecast = forecast.reindex(hist.index)
+                forecast = forecast.fillna(hist)
+                weights = np.array([0.3, 0.3, 0.4])  # hist, ewma, forecast
+                annual_returns = (
+                    weights[0] * hist +
+                    weights[1] * ewma +
+                    weights[2] * forecast
+                )
+            else:
+                weights = np.array([0.5, 0.5])  # hist, ewma
+                annual_returns = weights[0] * hist + weights[1] * ewma
 
         elif method == 'capm_adjusted':
             # Adjust historical returns using CAPM framework

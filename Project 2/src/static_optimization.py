@@ -45,6 +45,8 @@ class StaticPortfolioOptimizer:
 
         # Target parameters from requirements
         self.target_return = 0.05594  # CPI + 3%
+        self.growth_target = 0.73  # Balanced corridor midpoint
+        self.growth_bounds = (0.60, 0.76)
 
     @staticmethod
     def _get_asset_weight_ranges() -> Dict[str, Tuple[float, float]]:
