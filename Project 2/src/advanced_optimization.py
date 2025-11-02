@@ -58,13 +58,11 @@ class UtilityOptimizer:
         lower_bounds = np.array([b[0] for b in bounds])
         upper_bounds = np.array([b[1] for b in bounds])
 
-        # Start at lower bounds then distribute the remaining budget.
         weights = lower_bounds.copy()
         remaining = 1.0 - weights.sum()
 
         if remaining <= 0:
-            # If lower bounds already sum to >=1, normalize to keep feasibility.
-            return weights / weights.sum()
+            return weights / max(weights.sum(), 1e-12)
 
         slack = upper_bounds - weights
 
@@ -85,7 +83,6 @@ class UtilityOptimizer:
             remaining = 1.0 - weights.sum()
             slack = upper_bounds - weights
 
-        # Any residual due to rounding is pushed into the first asset with slack.
         if remaining > 1e-12:
             for idx in range(self.n_assets):
                 capacity = slack[idx]
@@ -96,7 +93,6 @@ class UtilityOptimizer:
                     if remaining <= 1e-12:
                         break
 
-        # Final adjustment for any tiny residual due to numerical drift.
         total = weights.sum()
         if abs(total - 1.0) > 1e-10:
             diff = 1.0 - total
@@ -193,7 +189,7 @@ class UtilityOptimizer:
                     'fun': lambda w: np.dot(w, annual_returns) - constraints['min_return']
                 })
 
-        # Bounds (no short selling)
+        # Bounds (no short selling) using asset-specific ranges
         bounds = [
             self.asset_weight_ranges.get(asset, (0.0, 1.0))
             for asset in self.asset_names
@@ -487,6 +483,7 @@ class CovarianceMatrixCorrector:
 
 def run_advanced_optimization():
     """Run advanced optimization for Questions 2(f-g)"""
+    from pathlib import Path
     from data_loader import AssetDataLoader
     from parameter_estimation import ParameterEstimator
     from static_optimization import StaticPortfolioOptimizer
@@ -517,11 +514,7 @@ def run_advanced_optimization():
     utility_optimizer = UtilityOptimizer(expected_returns, cov_matrix)
 
     # Get mean-variance optimal portfolio for comparison
-    static_optimizer = StaticPortfolioOptimizer(
-        expected_returns,
-        cov_matrix,
-        returns_data=returns_data
-    )
+    static_optimizer = StaticPortfolioOptimizer(expected_returns, cov_matrix)
     mv_result = static_optimizer.optimize_portfolio(target_return=0.05594, growth_allocation=0.7)
 
     # Compare utility-optimal with mean-variance
@@ -540,8 +533,7 @@ def run_advanced_optimization():
         print(f"  Active Assets: {metrics['n_assets']}")
         print("  Weights:")
         for asset, weight in zip(asset_labels, metrics['weights']):
-            if weight > 1e-4:
-                print(f"    {asset[:40]:40} {weight:6.2%}")
+            print(f"    {asset[:40]:40} {weight:6.2%}")
 
     # Question 2(g): Non-PSD Covariance Matrix Handling
     print("\n" + "="*60)
@@ -590,7 +582,7 @@ def run_advanced_optimization():
         )
         corrected_result = corrected_optimizer.optimize_portfolio(
             target_return=0.05594,
-            growth_allocation=0.7
+            growth_allocation=0.73
         )
 
         print(f"\nUsing {best_method} correction:")
