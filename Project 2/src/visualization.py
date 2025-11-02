@@ -34,8 +34,10 @@ class PortfolioVisualizer:
     def plot_efficient_frontier(self, frontier_data: pd.DataFrame,
                                special_portfolios: Optional[List[Dict]] = None,
                                individual_assets: Optional[Dict] = None,
+                               overlay_frontiers: Optional[List[Dict]] = None,
                                title: str = "Efficient Frontier",
-                               save_path: Optional[str] = None):
+                               save_path: Optional[str] = None,
+                               base_label: str = "Constrained Frontier"):
         """
         Plot efficient frontier with special portfolios highlighted
 
@@ -50,12 +52,27 @@ class PortfolioVisualizer:
 
         # Plot efficient frontier
         plt.plot(frontier_data['volatility'] * 100, frontier_data['return'] * 100,
-                'b-', linewidth=2.5, label='Efficient Frontier', zorder=5)
+                 'b-', linewidth=2.7, label=base_label, zorder=5)
 
         # Shade area under frontier
         plt.fill_between(frontier_data['volatility'] * 100,
-                        frontier_data['return'] * 100,
-                        0, alpha=0.1, color='blue')
+                         frontier_data['return'] * 100,
+                         0, alpha=0.08, color='navy')
+
+        if overlay_frontiers:
+            for frontier in overlay_frontiers:
+                data = frontier.get('data')
+                if data is None or data.empty:
+                    continue
+                sorted_data = data.sort_values('volatility')
+                plt.plot(sorted_data['volatility'] * 100,
+                         sorted_data['return'] * 100,
+                         linewidth=frontier.get('linewidth', 2),
+                         linestyle=frontier.get('linestyle', '-'),
+                         color=frontier.get('color', 'grey'),
+                         alpha=frontier.get('alpha', 0.3),
+                         label=frontier.get('label', 'Additional Frontier'),
+                         zorder=frontier.get('zorder', 4))
 
         # Plot individual assets if provided
         if individual_assets:
@@ -63,21 +80,20 @@ class PortfolioVisualizer:
                 marker = 'o' if '[G]' in asset_name else 's'
                 color = 'green' if '[G]' in asset_name else 'red'
                 plt.scatter(metrics['volatility'] * 100, metrics['return'] * 100,
-                          marker=marker, s=100, c=color, alpha=0.6,
-                          edgecolors='black', linewidth=1)
-                # Add labels for key assets
-                if any(x in asset_name for x in ['Australian Listed Equity', 'Cash', 'Fixed Income']):
-                    plt.annotate(asset_name.split('[')[0][:15],
-                               (metrics['volatility'] * 100, metrics['return'] * 100),
-                               fontsize=8, ha='right', va='bottom')
+                            marker=marker, s=110, c=color, alpha=0.65,
+                            edgecolors='black', linewidth=1)
+                label_text = asset_name.split('[')[0].strip()[:20]
+                plt.annotate(label_text,
+                             (metrics['volatility'] * 100, metrics['return'] * 100),
+                             fontsize=8, ha='right', va='bottom')
 
         # Plot special portfolios
         if special_portfolios:
             for portfolio in special_portfolios:
                 plt.scatter(portfolio['volatility'] * 100, portfolio['return'] * 100,
-                          marker='*', s=300, c='gold', edgecolor='black',
-                          linewidth=2, zorder=10,
-                          label=portfolio.get('name', 'Optimal'))
+                            marker='*', s=320, c='gold', edgecolor='black',
+                            linewidth=2, zorder=10,
+                            label=portfolio.get('name', 'Optimal'))
 
         # Add reference lines
         plt.axhline(y=5.594, color='red', linestyle='--', alpha=0.5,

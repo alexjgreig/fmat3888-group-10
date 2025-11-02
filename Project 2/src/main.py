@@ -24,7 +24,8 @@ from src.parameter_estimation import ParameterEstimator
 from src.static_optimization import StaticPortfolioOptimizer
 from src.advanced_optimization import UtilityOptimizer, CovarianceMatrixCorrector
 from src.dynamic_optimization import RiskManager, DynamicPortfolioOptimizer
-from src.visualization import PortfolioVisualizer
+from src.visualization_enhanced import EnhancedPortfolioVisualizer
+from src.blended_portfolio_analysis import BlendedPortfolioAnalyzer
 
 warnings.filterwarnings('ignore')
 
@@ -103,48 +104,11 @@ class PortfolioAnalysisRunner:
             returns_data=returns_data
         )
 
-        # Generate efficient frontier under different constraint tightness
-        print("\n📈 Generating Efficient Frontier...")
-        qualitative_bounds = [tuple(b) for b in static_optimizer.asset_bounds]
-        relaxed_bounds = [(0.0, 0.4) for _ in range(static_optimizer.n_assets)]
-        wide_bounds = [(0.0, 1.0) for _ in range(static_optimizer.n_assets)]
+        static_report = static_optimizer.generate_optimization_report()
+        min_var_result = static_report['minimum_variance_portfolio']
+        risk_comparison = static_report['risk_profile_comparison']
 
-        frontier_qualitative = static_optimizer.generate_efficient_frontier(
-            n_points=50,
-            growth_allocation=static_optimizer.growth_target,
-            bounds=qualitative_bounds,
-        )
-        frontier_relaxed = static_optimizer.generate_efficient_frontier(
-            n_points=50,
-            growth_allocation=static_optimizer.growth_target,
-            bounds=relaxed_bounds,
-        )
-        frontier_wide = static_optimizer.generate_efficient_frontier(
-            n_points=50,
-            growth_allocation=static_optimizer.growth_target,
-            bounds=wide_bounds,
-        )
-
-        # Find minimum variance portfolio
-        print("\n🎯 Finding Minimum Variance Portfolio...")
-        min_var_result = static_optimizer.find_minimum_variance_portfolio(
-            target_return=estimator.target_return,
-            growth_allocation=static_optimizer.growth_target
-        )
-
-        # Compare risk profiles
-        print("\n⚖️ Comparing Risk Profiles...")
-        risk_comparison = static_optimizer.compare_risk_profiles()
-
-        self.results['question_2_static'] = {
-            'efficient_frontiers': {
-                'qualitative': frontier_qualitative,
-                'relaxed': frontier_relaxed,
-                'wide': frontier_wide
-            },
-            'minimum_variance_portfolio': min_var_result,
-            'risk_profile_comparison': risk_comparison
-        }
+        self.results['question_2_static'] = static_report
 
         # Step 4: Question 2(f) - Utility Maximization
         print("\n" + "="*70)
@@ -233,13 +197,53 @@ class PortfolioAnalysisRunner:
             'strategy_comparison': strategy_comparison
         }
 
-        # Step 7: Generate Visualizations
+        # Step 7: Blended Portfolio (30% Utility / 70% Min-Variance)
+        print("\n" + "="*70)
+        print(" BLENDED PORTFOLIO: 30% UTILITY / 70% MIN-VARIANCE")
+        print("="*70)
+        blended_analyzer = BlendedPortfolioAnalyzer(
+            expected_returns,
+            cov_matrix,
+            returns_data,
+            risk_free_rate=estimator.risk_free_rate
+        )
+        blended_results = blended_analyzer.build_blended_portfolio(
+            utility_gamma=1.5,
+            blend_weight=0.30
+        )
+
+        blended_metrics = blended_results['blended']['metrics']
+        blended_robustness = blended_results['blended']['robustness']
+        historical_summary = blended_results['historical_summary']
+        latest_window = historical_summary[
+            (historical_summary['Portfolio'] == 'Blended (30% Utility / 70% Min-Var)') &
+            (historical_summary['Window'] == 'Last 5 Years')
+        ]
+
+        print(f"\n🔀 Blended Portfolio Metrics (Forward-Looking):")
+        print(f"  • Expected Return: {blended_metrics['return']:.2%}")
+        print(f"  • Net Expected Return: {blended_metrics['net_return']:.2%}")
+        print(f"  • Volatility: {blended_metrics['volatility']:.2%}")
+        print(f"  • Sharpe Ratio: {blended_metrics['sharpe_ratio']:.3f}")
+        print(f"  • Diversification Ratio: {blended_robustness['diversification_ratio']:.3f}")
+        print(f"  • Effective Number of Assets: {blended_robustness['effective_n_assets']:.2f}")
+        if not latest_window.empty:
+            last5 = latest_window.iloc[0]
+            print(f"\n📈 Realised 5Y Performance:")
+            print(f"  • Annual Return: {last5['Annual Return']:.2%}")
+            print(f"  • Volatility: {last5['Annual Volatility']:.2%}")
+            print(f"  • Sharpe Ratio: {last5['Sharpe Ratio']:.3f}")
+            print(f"  • Max Drawdown: {last5['Max Drawdown']:.2%}")
+
+        self.results['blended_portfolio'] = blended_results
+
+        # Step 8: Generate Visualizations
         print("\n" + "="*70)
         print(" GENERATING VISUALIZATIONS")
         print("="*70)
         self._create_visualizations()
 
-        # Step 8: Save Results
+        # Step 9: Save Results
         print("\n" + "="*70)
         print(" SAVING RESULTS")
         print("="*70)
@@ -253,33 +257,60 @@ class PortfolioAnalysisRunner:
         return self.results
 
     def _create_visualizations(self):
-        """Create all visualizations"""
-        visualizer = PortfolioVisualizer()
+        """Create all visualizations with enhanced styling"""
+        visualizer = EnhancedPortfolioVisualizer()
         output_dir = self.output_root / 'figures'
 
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
 
-        print("\n📊 Creating visualizations...")
+        print("\n📊 Creating enhanced visualizations...")
 
         # 1. Efficient Frontier
         if 'question_2_static' in self.results:
-            frontier = self.results['question_2_static']['efficient_frontiers']['qualitative']
+            frontiers = self.results['question_2_static']['efficient_frontiers']
+            constrained_frontier = frontiers.get('constrained')
             min_var = self.results['question_2_static']['minimum_variance_portfolio']['metrics']
 
-            special_portfolios = [{
-                'name': 'Min Variance (TR≥5.594%)',
-                'return': min_var['return'],
-                'volatility': min_var['volatility']
-            }]
+            if constrained_frontier is not None and not constrained_frontier.empty:
+                special_portfolios = [{
+                    'name': 'Min Variance (TR≥5.594%)',
+                    'return': min_var['return'],
+                    'volatility': min_var['volatility']
+                }]
 
-            visualizer.plot_efficient_frontier(
-                frontier,
-                special_portfolios=special_portfolios,
-                title='Efficient Frontier within Qualitative Bands (Growth 73%±2%)',
-                save_path=str(output_dir / f"efficient_frontier_{self.timestamp}.png")
-            )
-            print("✓ Efficient frontier plot created")
+                overlay_frontiers = []
+                unconstrained = frontiers.get('unconstrained')
+                if unconstrained is not None and not unconstrained.empty:
+                    overlay_frontiers.append({
+                        'data': unconstrained,
+                        'label': 'Frontier (No Growth Constraint)',
+                        'color': 'steelblue',
+                        'alpha': 0.35,
+                        'linewidth': 2,
+                        'linestyle': '--'
+                    })
+
+                expected_returns = self.results['question_1']['expected_returns']['recommended']
+                cov_matrix = self.results['question_1']['covariance_matrices']['recommended']
+                asset_stats = {
+                    asset: {
+                        'return': expected_returns[asset],
+                        'volatility': np.sqrt(cov_matrix.loc[asset, asset])
+                    }
+                    for asset in expected_returns.index
+                }
+
+                visualizer.plot_efficient_frontier(
+                    constrained_frontier,
+                    special_portfolios=special_portfolios,
+                    overlay_frontiers=overlay_frontiers,
+                    individual_assets=asset_stats,
+                    title='Portfolio Efficient Frontier Analysis',
+                    save_path=str(output_dir / f"efficient_frontier_{self.timestamp}.png"),
+                    base_label='Efficient Frontier (70% Growth, APRA Bounds)'
+                )
+                print("✓ Enhanced efficient frontier plot created")
 
         # 2. Correlation Heatmap
         if 'question_1' in self.results:
@@ -294,10 +325,10 @@ class PortfolioAnalysisRunner:
 
             visualizer.plot_correlation_heatmap(
                 corr_matrix,
-                title='Asset Correlation Matrix',
+                title='Asset Correlation Matrix Analysis',
                 save_path=str(output_dir / f"correlation_heatmap_{self.timestamp}.png")
             )
-            print("✓ Correlation heatmap created")
+            print("✓ Enhanced correlation heatmap created")
 
         # 3. Portfolio Weights
         if 'question_2_static' in self.results:
@@ -309,10 +340,23 @@ class PortfolioAnalysisRunner:
 
             visualizer.plot_portfolio_weights(
                 weights_series,
-                title='Optimal Portfolio Weights (Min Variance with TR≥5.594%)',
+                title='Optimal Portfolio Allocation Strategy',
                 save_path=str(output_dir / f"portfolio_weights_{self.timestamp}.png")
             )
-            print("✓ Portfolio weights plot created")
+            print("✓ Enhanced portfolio weights visualization created")
+
+        if 'blended_portfolio' in self.results:
+            blended_weights = self.results['blended_portfolio']['blended']['weights']
+            blended_series = pd.Series(
+                blended_weights,
+                index=self.results['question_1']['expected_returns']['recommended'].index
+            )
+            visualizer.plot_portfolio_weights(
+                blended_series,
+                title='Blended Portfolio Allocation (30% Utility / 70% Min-Var)',
+                save_path=str(output_dir / f"portfolio_weights_blended_{self.timestamp}.png")
+            )
+            print("✓ Blended portfolio weights visualization created")
 
         # 4. Risk Attribution
         if 'question_2_dynamic' in self.results:
@@ -320,10 +364,10 @@ class PortfolioAnalysisRunner:
 
             visualizer.plot_risk_attribution(
                 risk_attr,
-                title='Portfolio Risk Attribution Analysis',
+                title='Comprehensive Risk Attribution Analysis',
                 save_path=str(output_dir / f"risk_attribution_{self.timestamp}.png")
             )
-            print("✓ Risk attribution plot created")
+            print("✓ Enhanced risk attribution dashboard created")
 
         # 5. Strategy Comparison
         if 'question_2_dynamic' in self.results:
@@ -331,10 +375,18 @@ class PortfolioAnalysisRunner:
 
             visualizer.plot_performance_comparison(
                 strategy_comp,
-                title='Static vs Dynamic Strategy Performance',
+                title='Portfolio Strategy Performance Comparison',
                 save_path=str(output_dir / f"strategy_comparison_{self.timestamp}.png")
             )
-            print("✓ Strategy comparison plot created")
+            print("✓ Enhanced strategy comparison dashboard created")
+
+        # 6. Executive Summary Dashboard (new)
+        print("✓ Creating executive summary dashboard...")
+        visualizer.create_executive_summary(
+            self.results,
+            save_path=str(output_dir / f"executive_summary_{self.timestamp}.png")
+        )
+        print("✓ Executive summary dashboard created")
 
     def _save_results(self):
         """Save all results to files"""
@@ -343,12 +395,14 @@ class PortfolioAnalysisRunner:
 
         # Save key DataFrames to CSV
         if 'question_2_static' in self.results:
-            # Save efficient frontier
-            frontier = self.results['question_2_static']['efficient_frontiers']['qualitative']
-            frontier.to_csv(output_dir / f"efficient_frontier_{self.timestamp}.csv", index=False)
-            print(f"✓ Saved efficient frontier to CSV")
+            frontiers = self.results['question_2_static']['efficient_frontiers']
+            for label, frontier in frontiers.items():
+                if frontier is None or frontier.empty:
+                    continue
+                file_path = output_dir / f"efficient_frontier_{label}_{self.timestamp}.csv"
+                frontier.to_csv(file_path, index=False)
+                print(f"✓ Saved {label} efficient frontier to CSV")
 
-            # Save risk comparison
             risk_comp = self.results['question_2_static']['risk_profile_comparison']
             risk_comp.to_csv(output_dir / f"risk_profile_comparison_{self.timestamp}.csv", index=False)
             print(f"✓ Saved risk profile comparison to CSV")
@@ -377,17 +431,40 @@ class PortfolioAnalysisRunner:
             weights_df.to_csv(output_dir / f"optimal_weights_{self.timestamp}.csv", index=False)
             print(f"✓ Saved optimal weights to CSV")
 
+            metrics = self.results['question_2_static']['minimum_variance_portfolio']['metrics']
+            metrics_df = pd.DataFrame([{
+                'Expected_Return': metrics['return'],
+                'Net_Expected_Return': metrics['net_return'],
+                'Volatility': metrics['volatility'],
+                'Sharpe_Ratio': metrics['sharpe_ratio'],
+                'Growth_Allocation': metrics['growth_weight'],
+                'Defensive_Allocation': metrics['defensive_weight'],
+                'Weighted_Fee': metrics['weighted_fee']
+            }])
+            metrics_df.to_csv(output_dir / f"optimal_portfolio_metrics_{self.timestamp}.csv", index=False)
+            print(f"✓ Saved optimal portfolio metrics to CSV")
+
+        if 'blended_portfolio' in self.results:
+            blended = self.results['blended_portfolio']
+            blended_weights = blended['weights_table']
+            blended_weights.to_csv(output_dir / f"blended_portfolio_weights_{self.timestamp}.csv")
+            print("✓ Saved blended portfolio weights to CSV")
+
+            blended['expected_summary'].to_csv(
+                output_dir / f"blended_expected_summary_{self.timestamp}.csv"
+            )
+            blended['historical_summary'].to_csv(
+                output_dir / f"blended_historical_performance_{self.timestamp}.csv",
+                index=False
+            )
+            print("✓ Saved blended portfolio diagnostics to CSV")
+
 
 def main():
     """Main execution function"""
     # Set data path
-    data_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        '..',
-        'data',
-        'BBG Data (2000-2025).xlsx'
-    )
-    data_path = os.path.abspath(data_path)
+    data_path = Path(__file__).resolve().parent / '..' / 'data' / 'BBG Data (2000-2025).xlsx'
+    data_path = data_path.resolve()
 
     # Check if file exists
     if not data_path.exists():
@@ -425,6 +502,16 @@ def main():
         print(f"  • Strategy: {best_strategy['Strategy']}")
         print(f"  • Expected Return: {best_strategy['Expected Return']:.2%}")
         print(f"  • Sharpe Ratio: {best_strategy['Sharpe Ratio']:.3f}")
+
+    if 'blended_portfolio' in results:
+        blended_metrics = results['blended_portfolio']['blended']['metrics']
+        robustness = results['blended_portfolio']['blended']['robustness']
+        print(f"\n🔀 Blended Portfolio (30% Utility / 70% Min-Var):")
+        print(f"  • Expected Return: {blended_metrics['return']:.2%}")
+        print(f"  • Volatility: {blended_metrics['volatility']:.2%}")
+        print(f"  • Sharpe Ratio: {blended_metrics['sharpe_ratio']:.3f}")
+        print(f"  • Diversification Ratio: {robustness['diversification_ratio']:.3f}")
+        print(f"  • Effective Number of Assets: {robustness['effective_n_assets']:.2f}")
 
     print("\n" + "="*70)
     print("\n✅ All analyses completed successfully!")

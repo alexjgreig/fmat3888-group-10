@@ -9,9 +9,13 @@ import pandas as pd
 from scipy.optimize import minimize, LinearConstraint, Bounds
 from scipy.stats import norm
 from typing import Dict, List, Tuple, Optional
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+from pathlib import Path
+from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
@@ -38,6 +42,10 @@ class StaticPortfolioOptimizer:
         self.returns_data = returns_data
         self.asset_weight_ranges = self._get_asset_weight_ranges()
         self.asset_fees = self._get_asset_fees()
+        self.asset_bounds = [
+            self.asset_weight_ranges.get(name, (0.0, 0.4))
+            for name in self.asset_names
+        ]
 
         # Identify growth and defensive assets
         self.growth_indices = [i for i, name in enumerate(self.asset_names) if '[G]' in name]
@@ -133,7 +141,8 @@ class StaticPortfolioOptimizer:
                           max_weight: float = 0.4,
                           allow_short: bool = False,
                           enforce_exact_return: bool = False,
-                          enforce_asset_ranges: bool = True) -> Dict:
+                          enforce_asset_ranges: bool = True,
+                          custom_bounds: Optional[List[Tuple[float, float]]] = None) -> Dict:
         """
         Optimize portfolio with various constraints
 
@@ -162,7 +171,8 @@ class StaticPortfolioOptimizer:
             min_weight=min_weight,
             max_weight=max_weight,
             allow_short=allow_short,
-            enforce_asset_ranges=enforce_asset_ranges
+            enforce_asset_ranges=enforce_asset_ranges,
+            custom_bounds=custom_bounds
         )
 
         # Initial guess (equal weights adjusted for constraints)
@@ -233,8 +243,14 @@ class StaticPortfolioOptimizer:
                       min_weight: Optional[float],
                       max_weight: Optional[float],
                       allow_short: bool,
-                      enforce_asset_ranges: bool = True) -> List[Tuple[float, float]]:
+                      enforce_asset_ranges: bool = True,
+                      custom_bounds: Optional[List[Tuple[float, float]]] = None) -> List[Tuple[float, float]]:
         """Create bounds for portfolio weights."""
+        if custom_bounds is not None:
+            if len(custom_bounds) != self.n_assets:
+                raise ValueError("Custom bounds length must match number of assets.")
+            return custom_bounds
+
         if not enforce_asset_ranges:
             lower = min_weight if min_weight is not None else (-1.0 if allow_short else 0.0)
             upper = max_weight if max_weight is not None else (1.0 if allow_short else 1.0)
@@ -269,7 +285,8 @@ class StaticPortfolioOptimizer:
                                   min_weight: float,
                                   max_weight: float,
                                   allow_short: bool = False,
-                                  enforce_asset_ranges: bool = True) -> Dict:
+                                  enforce_asset_ranges: bool = True,
+                                  custom_bounds: Optional[List[Tuple[float, float]]] = None) -> Dict:
         """
         Optimize purely for expected return subject to feasibility constraints.
 
@@ -293,7 +310,13 @@ class StaticPortfolioOptimizer:
             target_return=None,
             growth_allocation=growth_allocation
         )
-        bounds = self._build_bounds(min_weight, max_weight, allow_short, enforce_asset_ranges=enforce_asset_ranges)
+        bounds = self._build_bounds(
+            min_weight,
+            max_weight,
+            allow_short,
+            enforce_asset_ranges=enforce_asset_ranges,
+            custom_bounds=custom_bounds
+        )
         x0 = np.ones(self.n_assets) / self.n_assets
 
         result = minimize(
@@ -320,7 +343,8 @@ class StaticPortfolioOptimizer:
                                    growth_allocation: Optional[float] = None,
                                    min_weight: float = 0.0,
                                    max_weight: float = 0.4,
-                                   enforce_asset_ranges: bool = True) -> pd.DataFrame:
+                                   enforce_asset_ranges: bool = True,
+                                   bounds: Optional[List[Tuple[float, float]]] = None) -> pd.DataFrame:
         """
         Generate efficient frontier points
 
@@ -334,19 +358,23 @@ class StaticPortfolioOptimizer:
         Returns:
             DataFrame with efficient frontier points
         """
+        use_asset_ranges = enforce_asset_ranges and bounds is None
+
         min_variance_result = self.optimize_portfolio(
             target_return=None,
             growth_allocation=growth_allocation,
             min_weight=min_weight,
             max_weight=max_weight,
-            enforce_asset_ranges=enforce_asset_ranges
+            enforce_asset_ranges=use_asset_ranges,
+            custom_bounds=bounds
         )
         max_return_result = self._optimize_expected_return(
             maximize=True,
             growth_allocation=growth_allocation,
             min_weight=min_weight,
             max_weight=max_weight,
-            enforce_asset_ranges=enforce_asset_ranges
+            enforce_asset_ranges=use_asset_ranges,
+            custom_bounds=bounds
         )
 
         if not (min_variance_result['success'] and max_return_result['success']):
@@ -398,7 +426,8 @@ class StaticPortfolioOptimizer:
                     min_weight=min_weight,
                     max_weight=max_weight,
                     enforce_exact_return=True,
-                    enforce_asset_ranges=enforce_asset_ranges
+                    enforce_asset_ranges=use_asset_ranges,
+                    custom_bounds=bounds
                 )
 
                 if result['success']:
@@ -428,11 +457,11 @@ class StaticPortfolioOptimizer:
         Returns:
             Optimization results
         """
+        # Use asset-specific bounds for consistency with efficient frontier
         result = self.optimize_portfolio(
             target_return=target_return,
             growth_allocation=growth_allocation,
-            min_weight=0.0,
-            max_weight=0.4
+            custom_bounds=self.asset_bounds
         )
 
         if result['success']:
@@ -585,7 +614,8 @@ class StaticPortfolioOptimizer:
     def plot_efficient_frontier(self, frontier_df: pd.DataFrame,
                                special_portfolios: Optional[List[Dict]] = None,
                                overlay_frontiers: Optional[List[Dict]] = None,
-                               save_path: Optional[str] = None):
+                               save_path: Optional[str] = None,
+                               base_label: str = 'Constrained Frontier'):
         """
         Plot the efficient frontier
 
@@ -604,7 +634,7 @@ class StaticPortfolioOptimizer:
 
         # Plot efficient frontier
         plt.plot(frontier_sorted['volatility'] * 100, frontier_sorted['return'] * 100,
-                'b-', linewidth=2, label='Efficient Frontier')
+                 'b-', linewidth=2.5, label=base_label)
 
         if overlay_frontiers:
             for frontier in overlay_frontiers:
@@ -615,9 +645,9 @@ class StaticPortfolioOptimizer:
                 plot_kwargs = {
                     'linewidth': frontier.get('linewidth', 2),
                     'linestyle': frontier.get('linestyle', '-'),
-                    'color': frontier.get('color', 'b'),
-                    'alpha': frontier.get('alpha', 0.3),
-                    'label': frontier.get('label', 'Additional Frontier')
+                    'color': frontier.get('color', 'grey'),
+                    'alpha': frontier.get('alpha', 0.35),
+                    'label': frontier.get('label', 'Unconstrained Frontier')
                 }
                 plt.plot(sorted_data['volatility'] * 100, sorted_data['return'] * 100,
                         **plot_kwargs)
@@ -631,7 +661,7 @@ class StaticPortfolioOptimizer:
             color = 'green' if i in self.growth_indices else 'red'
             plt.scatter(asset_vols[i], asset_returns[i],
                        marker=marker, s=100, c=color, alpha=0.6)
-            plt.annotate(asset.split('[')[0][:10], (asset_vols[i], asset_returns[i]),
+            plt.annotate(asset.split('[')[0].strip()[:18], (asset_vols[i], asset_returns[i]),
                         fontsize=8, ha='right')
 
         # Plot special portfolios if provided
@@ -656,7 +686,7 @@ class StaticPortfolioOptimizer:
             if save_dir:
                 os.makedirs(save_dir, exist_ok=True)
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        plt.close()
 
     def generate_optimization_report(self) -> Dict:
         """
@@ -672,31 +702,23 @@ class StaticPortfolioOptimizer:
         print("QUESTION 2a: EFFICIENT FRONTIER")
         print("="*60)
 
-        # Generate frontiers with different constraints
-        frontier_unconstrained = self.generate_efficient_frontier(
+        # Both frontiers with 70% growth constraint for consistency
+        constrained_frontier = self.generate_efficient_frontier(
             n_points=500,
-            min_weight=0.0,
-            max_weight=1.0,
-            enforce_asset_ranges=False
+            bounds=self.asset_bounds,
+            growth_allocation=0.7  # Apply 70% growth constraint
         )
 
-        frontier_constrained = self.generate_efficient_frontier(
+        # For comparison: frontier without growth constraint but with asset bounds
+        unconstrained_frontier = self.generate_efficient_frontier(
             n_points=500,
-            min_weight=0.0,
-            max_weight=0.4
-        )
-
-        frontier_balanced = self.generate_efficient_frontier(
-            n_points=500,
-            growth_allocation=0.7,
-            min_weight=0.0,
-            max_weight=0.4
+            bounds=self.asset_bounds,
+            growth_allocation=None  # No growth constraint for comparison
         )
 
         report['efficient_frontiers'] = {
-            'unconstrained': frontier_unconstrained,
-            'constrained': frontier_constrained,
-            'balanced_70_30': frontier_balanced
+            'constrained': constrained_frontier,
+            'unconstrained': unconstrained_frontier
         }
 
         # Question 2b: Minimum Variance Portfolio
@@ -732,25 +754,33 @@ class StaticPortfolioOptimizer:
         return report
 
 
-def run_static_optimization():
+def run_static_optimization(output_root: Optional[str] = None) -> Dict:
     """Run complete static portfolio optimization for Question 2(a-e)"""
-    from data_loader import AssetDataLoader
-    from parameter_estimation import ParameterEstimator
+    try:
+        from .data_loader import AssetDataLoader
+        from .parameter_estimation import ParameterEstimator
+    except ImportError:
+        from data_loader import AssetDataLoader
+        from parameter_estimation import ParameterEstimator
 
     print("="*60)
     print("STATIC PORTFOLIO OPTIMIZATION (Questions 2a-e)")
     print("="*60)
 
+    base_dir = Path(__file__).resolve().parents[1]
+    outputs_dir = Path(output_root).resolve() if output_root else base_dir / 'outputs'
+    figures_dir = outputs_dir / 'figures'
+    tables_dir = outputs_dir / 'tables'
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     # Load data
-    data_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'data',
-        'BBG Data (2000-2025).xlsx'
-    )
-    loader = AssetDataLoader(data_path)
+    data_path = base_dir / 'data' / 'BBG Data (2000-2025).xlsx'
+    loader = AssetDataLoader(str(data_path))
     returns_data = loader.load_data()
 
-    # Estimate parameters
+    # Estimate parameters using blended historical + forward-looking assumptions
     estimator = ParameterEstimator(returns_data)
     expected_returns = estimator.estimate_expected_returns('combined')
     cov_matrix = estimator.estimate_covariance_matrix('shrinkage')
@@ -761,32 +791,96 @@ def run_static_optimization():
     # Generate full report
     report = optimizer.generate_optimization_report()
 
-    # Plot efficient frontier
-    frontier_df = report['efficient_frontiers']['balanced_70_30']
-    min_var_portfolio = report['minimum_variance_portfolio']['metrics']
+    # Persist efficient frontier tables
+    frontier_paths: Dict[str, Path] = {}
+    for label, frontier in report['efficient_frontiers'].items():
+        if frontier is None or frontier.empty:
+            continue
+        file_path = tables_dir / f"efficient_frontier_{label}_{timestamp}.csv"
+        frontier.to_csv(file_path, index=False)
+        frontier_paths[label] = file_path
+
+    # Persist risk profile comparison
+    risk_profile_df = report['risk_profile_comparison']
+    risk_profile_path = tables_dir / f"risk_profile_comparison_{timestamp}.csv"
+    risk_profile_df.to_csv(risk_profile_path, index=False)
+
+    # Persist minimum variance weights (gross and percent)
+    min_var = report['minimum_variance_portfolio']
+    weights = pd.Series(min_var['weights'], index=optimizer.asset_names, name='Weight')
+    weights_df = pd.DataFrame({
+        'Asset': weights.index,
+        'Weight': weights.values,
+        'Weight_Pct': weights.values * 100
+    })
+    weights_path = tables_dir / f"minimum_variance_weights_{timestamp}.csv"
+    weights_df.to_csv(weights_path, index=False)
+    min_var_metrics = min_var['metrics']
+    metrics_df = pd.DataFrame([{
+        'Expected_Return': min_var_metrics['return'],
+        'Net_Expected_Return': min_var_metrics['net_return'],
+        'Volatility': min_var_metrics['volatility'],
+        'Sharpe_Ratio': min_var_metrics['sharpe_ratio'],
+        'Growth_Allocation': min_var_metrics['growth_weight'],
+        'Defensive_Allocation': min_var_metrics['defensive_weight'],
+        'Weighted_Fee': min_var_metrics['weighted_fee']
+    }])
+    metrics_path = tables_dir / f"minimum_variance_metrics_{timestamp}.csv"
+    metrics_df.to_csv(metrics_path, index=False)
+
+    # Persist efficient frontier visual
+    frontier_df = report['efficient_frontiers']['constrained']
 
     special_portfolios = [{
         'name': 'Min Variance (TR≥5.594%)',
-        'return': min_var_portfolio['return'],
-        'volatility': min_var_portfolio['volatility']
+        'return': min_var_metrics['return'],
+        'volatility': min_var_metrics['volatility']
     }]
 
     overlay_frontiers = [{
         'data': report['efficient_frontiers']['unconstrained'],
-        'label': 'Efficient Frontier (Unconstrained)',
-        'color': 'blue',
-        'alpha': 0.3,
-        'linewidth': 2
+        'label': 'Unconstrained Frontier',
+        'color': 'steelblue',
+        'alpha': 0.35,
+        'linewidth': 2,
+        'linestyle': '--'
     }]
 
+    frontier_fig_path = figures_dir / f"efficient_frontier_{timestamp}.png"
     optimizer.plot_efficient_frontier(
         frontier_df,
         special_portfolios=special_portfolios,
         overlay_frontiers=overlay_frontiers,
-        save_path='../outputs/figures/efficient_frontier.png'
+        save_path=str(frontier_fig_path),
+        base_label='Constrained Frontier'
     )
 
-    return report
+    # Additional visualization: minimum variance weights bar chart
+    weight_fig_path = figures_dir / f"minimum_variance_weights_{timestamp}.png"
+    plt.figure(figsize=(10, 6))
+    weights.sort_values(ascending=False).plot(kind='bar')
+    plt.ylabel('Weight')
+    plt.title('Minimum Variance Portfolio Weights')
+    plt.tight_layout()
+    plt.savefig(weight_fig_path, dpi=300)
+    plt.close()
+
+    outputs = {
+        'report': report,
+        'tables': {
+            'efficient_frontiers': frontier_paths,
+            'risk_profile_comparison': risk_profile_path,
+            'minimum_variance_weights': weights_path,
+            'minimum_variance_metrics': metrics_path
+        },
+        'figures': {
+            'efficient_frontier': frontier_fig_path,
+            'minimum_variance_weights': weight_fig_path
+        },
+        'timestamp': timestamp
+    }
+
+    return outputs
 
 
 if __name__ == "__main__":

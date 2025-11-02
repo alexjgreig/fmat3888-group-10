@@ -1,0 +1,4 @@
+Portfolio,Expected Return (%),Volatility (%),Sharpe Ratio,VaR 95% (%),CVaR 95% (%),Growth Allocation (%),Defensive Allocation (%),Diversification Ratio,Effective N Assets,Max Weight (%),Number of Positions
+Min Var,6.18,4.60,0.909,0.00,0.00,64.0,36.0,0.000,0.0,0.0,0
+Utility,6.18,4.94,0.846,0.00,0.00,64.0,36.0,1.327,5.2,25.0,6
+Blended,6.18,4.69,0.890,1.54,3.50,64.0,36.0,1.355,5.1,28.2,6

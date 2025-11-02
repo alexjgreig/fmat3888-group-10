@@ -1,0 +1,10 @@
+Asset,Weight,Weight_Pct
+Australian Listed Equity [G],0.15,15.0
+Int'l Listed Equity (Hedged) [G],0.0,0.0
+Int'l Listed Equity (Unhedged) [G],0.0,0.0
+Australian Listed Property [G],2.7293672702872333e-17,2.7293672702872334e-15
+Int'l Listed Property [G],0.18999999999999992,18.999999999999993
+Int'l Listed Infrastructure [G],0.3,30.0
+Australian Fixed Income [D],0.21000000000000002,21.000000000000004
+Int'l Fixed Income (Hedged) [D],0.0,0.0
+Cash [D],0.15,15.0

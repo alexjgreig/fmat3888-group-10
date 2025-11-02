@@ -1,0 +1,4 @@
+Portfolio,Return (%),Volatility (%),Growth Allocation (%),Efficient on Unconstrained,Efficient on Growth-Constrained
+Min Variance,6.181882985861255,4.60296306228654,63.99999999999999,No (+0.44% vol),Yes (exact match)
+Utility (γ=1),6.178155470972373,4.939121705601133,64.00000000000001,To be checked,To be checked
+Blended (30/70),6.18076473139459,4.694887861366217,63.99999999999999,To be checked,To be checked

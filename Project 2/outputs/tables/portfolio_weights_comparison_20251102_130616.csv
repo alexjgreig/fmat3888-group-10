@@ -1,0 +1,10 @@
+,Minimum Variance,Utility Optimized,"Blended (30% Utility, 70% Min Var)",Difference (Utility - MinVar),Asset Type
+Australian Listed Equity [G],15.0,15.0,15.0,0.0,Growth
+Int'l Listed Equity (Hedged) [G],0.0,0.0,0.0,0.0,Growth
+Int'l Listed Equity (Unhedged) [G],0.0,0.0,0.0,0.0,Growth
+Australian Listed Property [G],2.7293672702872334e-15,5.4597099713220404e-14,1.8289687003167182e-14,5.186773244293317e-14,Growth
+Int'l Listed Property [G],18.999999999999993,24.999999999999982,20.799999999999986,5.9999999999999885,Growth
+Int'l Listed Infrastructure [G],30.0,23.99999999999997,28.199999999999992,-6.0000000000000275,Growth
+Australian Fixed Income [D],21.000000000000004,5.000000000000006,16.2,-15.999999999999995,Defensive
+Int'l Fixed Income (Hedged) [D],0.0,16.000000000000014,4.800000000000004,16.000000000000014,Defensive
+Cash [D],15.0,15.0,15.0,0.0,Defensive
