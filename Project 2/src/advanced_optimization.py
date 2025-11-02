@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from scipy.stats import norm, lognorm
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -32,6 +32,95 @@ class UtilityOptimizer:
         self.risk_free_rate = risk_free_rate
         self.n_assets = len(expected_returns)
         self.asset_names = expected_returns.index.tolist()
+        self.asset_weight_ranges = self._get_asset_weight_ranges()
+
+    @staticmethod
+    def _get_asset_weight_ranges() -> Dict[str, Tuple[float, float]]:
+        """
+        Asset-level minimum and maximum weights aligned with updated guidance.
+        """
+        return {
+            'Australian Listed Equity [G]': (0.15, 0.45),
+            "Int'l Listed Equity (Hedged) [G]": (0.0, 0.35),
+            "Int'l Listed Equity (Unhedged) [G]": (0.0, 0.35),
+            'Australian Listed Property [G]': (0.0, 0.25),
+            "Int'l Listed Property [G]": (0.0, 0.25),
+            "Int'l Listed Infrastructure [G]": (0.0, 0.30),
+            'Australian Fixed Income [D]': (0.05, 0.40),
+            "Int'l Fixed Income (Hedged) [D]": (0.0, 0.35),
+            'Cash [D]': (0.0, 0.15)
+        }
+
+    def _construct_feasible_initial_weights(self, bounds: List[Tuple[float, float]]) -> np.ndarray:
+        """
+        Build an initial guess that respects per-asset bounds and sums to one.
+        """
+        lower_bounds = np.array([b[0] for b in bounds])
+        upper_bounds = np.array([b[1] for b in bounds])
+
+        # Start at lower bounds then distribute the remaining budget.
+        weights = lower_bounds.copy()
+        remaining = 1.0 - weights.sum()
+
+        if remaining <= 0:
+            # If lower bounds already sum to >=1, normalize to keep feasibility.
+            return weights / weights.sum()
+
+        slack = upper_bounds - weights
+
+        for _ in range(self.n_assets):
+            if remaining <= 1e-12:
+                break
+
+            available = slack > 1e-12
+            total_slack = slack[available].sum()
+            if total_slack <= 0:
+                break
+
+            proportional_add = np.zeros_like(weights)
+            proportional_add[available] = slack[available] / total_slack * remaining
+            proportional_add = np.minimum(proportional_add, slack)
+
+            weights += proportional_add
+            remaining = 1.0 - weights.sum()
+            slack = upper_bounds - weights
+
+        # Any residual due to rounding is pushed into the first asset with slack.
+        if remaining > 1e-12:
+            for idx in range(self.n_assets):
+                capacity = slack[idx]
+                if capacity > 0:
+                    add = min(capacity, remaining)
+                    weights[idx] += add
+                    remaining -= add
+                    if remaining <= 1e-12:
+                        break
+
+        # Final adjustment for any tiny residual due to numerical drift.
+        total = weights.sum()
+        if abs(total - 1.0) > 1e-10:
+            diff = 1.0 - total
+            if diff > 0:
+                for idx in range(self.n_assets):
+                    capacity = upper_bounds[idx] - weights[idx]
+                    if capacity > 0:
+                        add = min(capacity, diff)
+                        weights[idx] += add
+                        diff -= add
+                        if diff <= 1e-12:
+                            break
+            else:
+                diff = -diff
+                for idx in range(self.n_assets - 1, -1, -1):
+                    capacity = weights[idx] - lower_bounds[idx]
+                    if capacity > 0:
+                        sub = min(capacity, diff)
+                        weights[idx] -= sub
+                        diff -= sub
+                        if diff <= 1e-12:
+                            break
+
+        return np.clip(weights, lower_bounds, upper_bounds)
 
     def exponential_utility(self, wealth: float, gamma: float = 1) -> float:
         """
@@ -105,10 +194,13 @@ class UtilityOptimizer:
                 })
 
         # Bounds (no short selling)
-        bounds = [(0, 0.4) for _ in range(self.n_assets)]
+        bounds = [
+            self.asset_weight_ranges.get(asset, (0.0, 1.0))
+            for asset in self.asset_names
+        ]
 
         # Initial guess
-        x0 = np.ones(self.n_assets) / self.n_assets
+        x0 = self._construct_feasible_initial_weights(bounds)
 
         # Optimize
         result = minimize(
@@ -437,6 +529,7 @@ def run_advanced_optimization():
 
     print("\nPortfolio Comparison:")
     print("-"*60)
+    asset_labels = utility_optimizer.asset_names
     for portfolio_name, metrics in comparison.items():
         print(f"\n{portfolio_name}:")
         print(f"  Expected Return: {metrics['expected_return']:.2%}")
@@ -445,6 +538,10 @@ def run_advanced_optimization():
         print(f"  Utility: {metrics['utility']:.6f}")
         print(f"  Max Weight: {metrics['max_weight']:.2%}")
         print(f"  Active Assets: {metrics['n_assets']}")
+        print("  Weights:")
+        for asset, weight in zip(asset_labels, metrics['weights']):
+            if weight > 1e-4:
+                print(f"    {asset[:40]:40} {weight:6.2%}")
 
     # Question 2(g): Non-PSD Covariance Matrix Handling
     print("\n" + "="*60)
